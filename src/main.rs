@@ -9,6 +9,7 @@ use reql::{
 };
 use serde_json::{from_value, Value};
 
+#[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 struct Domain {
     id: u64,
@@ -36,6 +37,13 @@ impl Default for ReConfig {
 }
 
 const DOMAIN: &str = "https://lmpk.tk";
+const DATABASE_NAME: &str = "redirector";
+// table name for domains in debug
+#[cfg(debug_assertions)]
+const TABLE_NAME: &str = "domainsDev";
+// table name for domains in release
+#[cfg(not(debug_assertions))]
+const TABLE_NAME: &str = "domains";
 
 #[get("/<name>")]
 async fn redirector(name: String) -> Redirect {
@@ -53,11 +61,10 @@ async fn redirector(name: String) -> Redirect {
         return Redirect::to(DOMAIN);
     }
     let conn = conn.unwrap().clone();
-    let mut query = r.db("redirector").table("domains").run(&conn);
+    let mut query = r.db(DATABASE_NAME).table(TABLE_NAME).run(&conn);
     let mut route = DOMAIN.to_string();
     while let Ok(domain) = query.try_next().await {
-        if let Some(domain) = domain {
-            let domain: Domain = serde_json::from_value(domain).unwrap();
+        if let Some(domain) = domain as Option<Domain> {
             if name == domain.name {
                 route = domain.domain;
                 break;
@@ -94,7 +101,41 @@ fn remove_redirect(name: Option<String>) -> &'static str {
 
 #[rocket::main]
 async fn main() -> Result<(), rocket::Error> {
-    dotenv::dotenv().ok();
+    // get database configs
+    let conf = match Config::figment().extract::<ReConfig>() {
+        Ok(conf) => conf,
+        Err(_) => {
+            println!("Database config not found. Using default values");
+            ReConfig::default()
+        }
+    };
+    // connect to database
+    let options = Options::new()
+        .host(conf.db_host)
+        .port(conf.db_port)
+        .user(conf.db_user)
+        .password(conf.db_password);
+    let conn = r.connect(options).await;
+    if conn.is_err() {
+        panic!("Can't connect to the database");
+    }
+    // create database if needed
+    let conn = conn.unwrap().clone();
+    let mut query = r.db_create(DATABASE_NAME).run(&conn);
+    if let Ok(out) = query.try_next().await {
+        if let Some(out) = out as Option<Value> {
+            println!("Database created")
+        }
+    }
+    // create table if needed
+    let mut query = r.db(DATABASE_NAME).table_create(TABLE_NAME).run(&conn);
+    if let Ok(out) = query.try_next().await {
+        if let Some(out) = out as Option<Value> {
+            println!("Table created")
+        }
+    }
+
+    // build, mount and launch
     let _rocket = rocket::build()
         .mount("/", routes![index])
         // change `r` to change redirecting prefix e.g. example.com/r/<name of redirect>
