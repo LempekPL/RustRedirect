@@ -31,7 +31,7 @@ impl Default for ReConfig {
             db_host: "localhost".to_string(),
             db_port: 28015u16,
             db_user: "admin".to_string(),
-            db_password: "".to_string()
+            db_password: "".to_string(),
         }
     }
 }
@@ -61,10 +61,13 @@ async fn redirector(name: String) -> Redirect {
         return Redirect::to(DOMAIN);
     }
     let conn = conn.unwrap().clone();
-    let mut query = r.db(DATABASE_NAME).table(TABLE_NAME).run(&conn);
+    let mut query = r
+        .db(DATABASE_NAME)
+        .table(TABLE_NAME)
+        .run::<_, Domain>(&conn);
     let mut route = DOMAIN.to_string();
     while let Ok(domain) = query.try_next().await {
-        if let Some(domain) = domain as Option<Domain> {
+        if let Some(domain) = domain {
             if name == domain.name {
                 route = domain.domain;
                 break;
@@ -121,18 +124,19 @@ async fn main() -> Result<(), rocket::Error> {
     }
     // create database if needed
     let conn = conn.unwrap().clone();
-    let mut query = r.db_create(DATABASE_NAME).run(&conn);
-    if let Ok(out) = query.try_next().await {
-        if let Some(out) = out as Option<Value> {
-            println!("Database created")
-        }
+    let mut query = r
+        .db_create(DATABASE_NAME)
+        .run::<_, Value>(&conn);
+    if query.try_next().await.is_ok() {
+        println!("Database created");
     }
     // create table if needed
-    let mut query = r.db(DATABASE_NAME).table_create(TABLE_NAME).run(&conn);
-    if let Ok(out) = query.try_next().await {
-        if let Some(out) = out as Option<Value> {
-            println!("Table created")
-        }
+    let mut query = r
+        .db(DATABASE_NAME)
+        .table_create(TABLE_NAME)
+        .run::<_, Value>(&conn);
+    if query.try_next().await.is_ok() {
+        println!("Table created");
     }
 
     // build, mount and launch
