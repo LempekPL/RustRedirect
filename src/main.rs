@@ -6,13 +6,13 @@ mod api;
 extern crate rocket;
 
 use rocket::{Config, response::Redirect, futures::TryStreamExt};
-use serde::Deserialize;
+use serde::{Serialize, Deserialize};
 use reql::{r, cmd::connect::Options, Session};
 use serde_json::{Value};
 use crate::api::v1::mount_v1;
 
 #[allow(dead_code)]
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 struct Domain {
     id: u64,
     name: String,
