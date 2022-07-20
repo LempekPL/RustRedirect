@@ -11,7 +11,9 @@
 
 ## Api endpoints
 
-- GET `/api/v1/redirect/list`\
+- GET `/api/v1/redirect` - get list of redirects\
+  Hearders:
+  Authorization - string key\
   Response: JSON\
   Object{ success: bool, response: Array\[Domain] | string }\
   Domain = {id: number, name: string, domain: string}\
@@ -26,11 +28,11 @@
     ]
   }
   ```
-- POST `/api/v1/redirect/create?name=<name>&domain=<domain>`\
+- POST `/api/v1/redirect/create?name=<name>&domain=<domain>` - create redirect\
   Params:
   name - string, domain - string\
   Hearders:
-  Authorization
+  Authorization - string key\
   Response: JSON\
   Object{ success: bool, response: string }\
   \

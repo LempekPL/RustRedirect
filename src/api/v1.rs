@@ -36,7 +36,7 @@ pub(crate) fn mount_v1(rocket: Rocket<Build>) -> Rocket<Build> {
     // )
 }
 
-#[get("/list")]
+#[get("/")]
 async fn check_domains() -> Json<Response> {
     let conn = match get_conn().await {
         Ok(conn) => conn,
