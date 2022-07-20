@@ -1,4 +1,6 @@
-#[cfg(test)] mod tests;
+#[cfg(test)]
+mod tests;
+mod api;
 
 #[macro_use]
 extern crate rocket;
@@ -7,6 +9,7 @@ use rocket::{Config, response::Redirect, futures::TryStreamExt};
 use serde::Deserialize;
 use reql::{r, cmd::connect::Options, Session};
 use serde_json::{Value};
+use crate::api::v1::mount_v1;
 
 #[allow(dead_code)]
 #[derive(Deserialize, Debug)]
@@ -14,25 +17,6 @@ struct Domain {
     id: u64,
     name: String,
     domain: String,
-}
-
-#[derive(Deserialize)]
-struct ReConfig {
-    db_host: String,
-    db_port: u16,
-    db_user: String,
-    db_password: String,
-}
-
-impl Default for ReConfig {
-    fn default() -> Self {
-        Self {
-            db_host: "localhost".to_string(),
-            db_port: 28015u16,
-            db_user: "admin".to_string(),
-            db_password: "".to_string(),
-        }
-    }
 }
 
 const DOMAIN: &str = "https://lmpk.tk";
@@ -73,24 +57,6 @@ fn index() -> &'static str {
     "Hello, world!"
 }
 
-#[get("/")]
-fn check_list() -> &'static str {
-    "Hello, world!"
-}
-
-#[post("/create?<name>&<domain>")]
-fn create_redirect(name: Option<String>, domain: Option<String>) {}
-
-#[put("/edit?<name>&<domain>")]
-fn edit_redirect(name: Option<String>, domain: Option<String>) -> &'static str {
-    "Hello, world!"
-}
-
-#[delete("/delete?<name>")]
-fn remove_redirect(name: Option<String>) -> &'static str {
-    "Hello, world!"
-}
-
 #[rocket::main]
 async fn main() -> Result<(), rocket::Error> {
     let conn = match get_conn().await {
@@ -102,27 +68,46 @@ async fn main() -> Result<(), rocket::Error> {
         .db_create(DATABASE_NAME)
         .run::<_, Value>(&conn);
     if query.try_next().await.is_ok() {
-        println!("Database created");
+        println!("{} database created", DATABASE_NAME);
     }
-    // create table if needed
+    // create table for domains if needed
     let mut query = r
         .db(DATABASE_NAME)
         .table_create(TABLE_NAME)
         .run::<_, Value>(&conn);
     if query.try_next().await.is_ok() {
-        println!("Table created");
+        println!("{} table created", TABLE_NAME);
     }
 
     // build, mount and launch
-    let _rocket = rocket::build()
+    let rocket = rocket::build()
         .mount("/", routes![index])
         // change `r` to change redirecting prefix e.g. example.com/r/<name of redirect>
-        .mount("/r", routes![redirector])
-        .mount("/api/v1", routes![check_list, create_redirect, edit_redirect, remove_redirect])
-        .launch()
+        .mount("/r", routes![redirector]);
+    let rocket = mount_v1(rocket);
+    let _rocket = rocket.launch()
         .await?;
 
     Ok(())
+}
+
+#[derive(Deserialize)]
+struct ReConfig {
+    db_host: String,
+    db_port: u16,
+    db_user: String,
+    db_password: String,
+}
+
+impl Default for ReConfig {
+    fn default() -> Self {
+        Self {
+            db_host: "localhost".to_string(),
+            db_port: 28015u16,
+            db_user: "admin".to_string(),
+            db_password: "".to_string(),
+        }
+    }
 }
 
 async fn get_conn() -> reql::Result<Session> {
