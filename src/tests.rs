@@ -3,7 +3,7 @@ extern crate rocket;
 use reql::r;
 use rocket::{Build, Rocket, futures::TryStreamExt};
 use serde_json::Value;
-use crate::{TABLE_NAME, DATABASE_NAME, index, redirector, create_redirect, edit_redirect, remove_redirect, check_list, get_conn};
+use crate::{TABLE_NAME, DATABASE_NAME, index, redirector, get_conn, mount_v1};
 
 async fn rocket_build() -> Rocket<Build> {
     let conn = match get_conn().await {
@@ -30,8 +30,8 @@ async fn rocket_build() -> Rocket<Build> {
     let rocket = rocket::build()
         .mount("/", routes![index])
         // change `r` to change redirecting prefix e.g. example.com/r/<name of redirect>
-        .mount("/r", routes![redirector])
-        .mount("/api/v1", routes![check_list, create_redirect, edit_redirect, remove_redirect]);
+        .mount("/r", routes![redirector]);
+    let rocket = mount_v1(rocket);
 
     rocket
 }
