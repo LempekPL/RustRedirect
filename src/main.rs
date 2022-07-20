@@ -1,13 +1,13 @@
 #[macro_use]
 extern crate rocket;
 
-use std::borrow::Cow;
-use dotenv::var;
-use rocket::{Build, Rocket, response::Redirect};
+use rocket::{Build, Rocket, response::Redirect, futures::TryStreamExt, Config};
 use serde::Deserialize;
-use reql::{r, cmd::connect::Options};
-use rocket::futures::TryStreamExt;
-use serde_json::Value;
+use reql::{
+    r,
+    cmd::connect::Options,
+};
+use serde_json::{from_value, Value};
 
 #[derive(Deserialize, Debug)]
 struct Domain {
@@ -16,16 +16,38 @@ struct Domain {
     domain: String,
 }
 
+#[derive(Deserialize)]
+struct ReConfig {
+    db_host: String,
+    db_port: u16,
+    db_user: String,
+    db_password: String,
+}
+
+impl Default for ReConfig {
+    fn default() -> Self {
+        Self {
+            db_host: "localhost".to_string(),
+            db_port: 28015u16,
+            db_user: "admin".to_string(),
+            db_password: "".to_string()
+        }
+    }
+}
+
 const DOMAIN: &str = "https://lmpk.tk";
 
 #[get("/<name>")]
 async fn redirector(name: String) -> Redirect {
+    let conf = match Config::figment().extract::<ReConfig>() {
+        Ok(conf) => conf,
+        Err(_) => ReConfig::default()
+    };
     let options = Options::new()
-        .host(var("DB_HOST").unwrap())
-        .port(var("DB_PORT").unwrap().parse::<u16>().unwrap())
-        .db(var("DB_DB").unwrap())
-        .user(var("DB_USER").unwrap())
-        .password(var("DB_PASSWORD").unwrap());
+        .host(conf.db_host)
+        .port(conf.db_port)
+        .user(conf.db_user)
+        .password(conf.db_password);
     let conn = r.connect(options).await;
     if conn.is_err() {
         return Redirect::to(DOMAIN);
