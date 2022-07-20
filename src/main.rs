@@ -57,18 +57,16 @@ fn check_list() -> &'static str {
     "Hello, world!"
 }
 
-#[post("/")]
-fn create_redirect() -> &'static str {
+#[post("/create?<name>&<domain>")]
+fn create_redirect(name: Option<String>, domain: Option<String>) {}
+
+#[put("/edit?<name>&<domain>")]
+fn edit_redirect(name: Option<String>, domain: Option<String>) -> &'static str {
     "Hello, world!"
 }
 
-#[put("/")]
-fn edit_redirect() -> &'static str {
-    "Hello, world!"
-}
-
-#[delete("/")]
-fn remove_redirect() -> &'static str {
+#[delete("/delete?<name>")]
+fn remove_redirect(name: Option<String>) -> &'static str {
     "Hello, world!"
 }
 
@@ -77,8 +75,9 @@ async fn main() -> Result<(), rocket::Error> {
     dotenv::dotenv().ok();
     let _rocket = rocket::build()
         .mount("/", routes![index])
-        .mount("/redirect", routes![redirector])
-        .mount("/api/v1", routes![check_list, ])
+        // change `r` to change redirecting prefix e.g. example.com/r/<name of redirect>
+        .mount("/r", routes![redirector])
+        .mount("/api/v1", routes![check_list, create_redirect, edit_redirect, remove_redirect])
         .launch()
         .await?;
 
