@@ -1,0 +1,51 @@
+extern crate rocket;
+
+use reql::r;
+use rocket::{Build, Rocket, futures::TryStreamExt};
+use serde_json::Value;
+use crate::{TABLE_NAME, DATABASE_NAME, index, redirector, create_redirect, edit_redirect, remove_redirect, check_list, get_conn};
+
+async fn rocket_build() -> Rocket<Build> {
+    let conn = match get_conn().await {
+        Ok(conn) => conn,
+        Err(_) => panic!("Can't connect to the database")
+    };
+    // create database if needed
+    let mut query = r
+        .db_create(DATABASE_NAME)
+        .run::<_, Value>(&conn);
+    if query.try_next().await.is_ok() {
+        println!("Database created");
+    }
+    // create table if needed
+    let mut query = r
+        .db(DATABASE_NAME)
+        .table_create(TABLE_NAME)
+        .run::<_, Value>(&conn);
+    if query.try_next().await.is_ok() {
+        println!("Table created");
+    }
+
+    // build, mount and launch
+    let rocket = rocket::build()
+        .mount("/", routes![index])
+        // change `r` to change redirecting prefix e.g. example.com/r/<name of redirect>
+        .mount("/r", routes![redirector])
+        .mount("/api/v1", routes![check_list, create_redirect, edit_redirect, remove_redirect]);
+
+    rocket
+}
+
+mod test {
+    use rocket::local::asynchronous::Client;
+    use rocket::http::Status;
+    use crate::tests::rocket_build;
+
+    #[rocket::async_test]
+    async fn get_redirect() {
+        let client = Client::tracked(rocket_build().await).await.expect("valid rocket instance");
+        let response = client.get("/r/test").dispatch().await;
+        assert_eq!(response.status(), Status::SeeOther);
+        assert_eq!(response.headers().get_one("Location"), Some("https://example.com"));
+    }
+}

@@ -1,13 +1,12 @@
+#[cfg(test)] mod tests;
+
 #[macro_use]
 extern crate rocket;
 
-use rocket::{Build, Rocket, response::Redirect, futures::TryStreamExt, Config};
+use rocket::{Config, response::Redirect, futures::TryStreamExt};
 use serde::Deserialize;
-use reql::{
-    r,
-    cmd::connect::Options,
-};
-use serde_json::{from_value, Value};
+use reql::{r, cmd::connect::Options, Session};
+use serde_json::{Value};
 
 #[allow(dead_code)]
 #[derive(Deserialize, Debug)]
@@ -47,20 +46,10 @@ const TABLE_NAME: &str = "domains";
 
 #[get("/<name>")]
 async fn redirector(name: String) -> Redirect {
-    let conf = match Config::figment().extract::<ReConfig>() {
-        Ok(conf) => conf,
-        Err(_) => ReConfig::default()
+    let conn = match get_conn().await {
+        Ok(conn) => conn,
+        Err(_) => return Redirect::to(DOMAIN)
     };
-    let options = Options::new()
-        .host(conf.db_host)
-        .port(conf.db_port)
-        .user(conf.db_user)
-        .password(conf.db_password);
-    let conn = r.connect(options).await;
-    if conn.is_err() {
-        return Redirect::to(DOMAIN);
-    }
-    let conn = conn.unwrap().clone();
     let mut query = r
         .db(DATABASE_NAME)
         .table(TABLE_NAME)
@@ -104,26 +93,11 @@ fn remove_redirect(name: Option<String>) -> &'static str {
 
 #[rocket::main]
 async fn main() -> Result<(), rocket::Error> {
-    // get database configs
-    let conf = match Config::figment().extract::<ReConfig>() {
-        Ok(conf) => conf,
-        Err(_) => {
-            println!("Database config not found. Using default values");
-            ReConfig::default()
-        }
+    let conn = match get_conn().await {
+        Ok(conn) => conn,
+        Err(_) => panic!("Can't connect to the database")
     };
-    // connect to database
-    let options = Options::new()
-        .host(conf.db_host)
-        .port(conf.db_port)
-        .user(conf.db_user)
-        .password(conf.db_password);
-    let conn = r.connect(options).await;
-    if conn.is_err() {
-        panic!("Can't connect to the database");
-    }
     // create database if needed
-    let conn = conn.unwrap().clone();
     let mut query = r
         .db_create(DATABASE_NAME)
         .run::<_, Value>(&conn);
@@ -149,4 +123,23 @@ async fn main() -> Result<(), rocket::Error> {
         .await?;
 
     Ok(())
+}
+
+async fn get_conn() -> reql::Result<Session> {
+    // get database configs
+    let conf = match Config::figment().extract::<ReConfig>() {
+        Ok(conf) => conf,
+        Err(_) => {
+            println!("Database config not found. Using default values");
+            ReConfig::default()
+        }
+    };
+    // connect to database
+    let options = Options::new()
+        .host(conf.db_host)
+        .port(conf.db_port)
+        .user(conf.db_user)
+        .password(conf.db_password);
+    let conn = r.connect(options).await;
+    conn
 }
