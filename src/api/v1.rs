@@ -12,12 +12,6 @@ struct Response {
     response: Value,
 }
 
-// #[derive(Serialize)]
-// struct ResponseDomains {
-//     success: bool,
-//     response: Vec<Domain>,
-// }
-
 pub(crate) fn mount_v1(rocket: Rocket<Build>) -> Rocket<Build> {
     rocket.mount(
         "/api/v1/redirect",
