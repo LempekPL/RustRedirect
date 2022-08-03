@@ -4,7 +4,8 @@ use rocket::futures::TryStreamExt;
 use serde::Serialize;
 use rocket::serde::json::Json;
 use serde_json::Value;
-use crate::{DATABASE_NAME, Domain, get_conn, TABLE_NAME};
+use crate::{DATABASE_NAME, Domain, TABLE_NAME};
+use crate::database::Conn;
 
 #[derive(Serialize)]
 struct Response {
@@ -32,7 +33,7 @@ pub(crate) fn mount_v1(rocket: Rocket<Build>) -> Rocket<Build> {
 
 #[get("/")]
 async fn check_domains() -> Json<Response> {
-    let conn = match get_conn().await {
+    let conn = match Conn::new().await {
         Ok(conn) => conn,
         Err(_) => return Json(Response {
             success: false,
