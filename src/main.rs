@@ -7,42 +7,40 @@ mod database;
 #[macro_use]
 extern crate rocket;
 
+use mongodb::bson::doc;
+use mongodb::error::Error;
+use rocket::futures::TryStreamExt;
 use rocket::response::Redirect;
 use serde_json::Value;
 use crate::api::v1::mount_v1;
-use crate::database::{Conn, Domain, filter_name};
+use crate::database::{connect, Domain};
 
 const DOMAIN: &str = "https://lmpk.tk";
 const DATABASE_NAME: &str = "redirector";
-// table name for domains in debug
+// collection for domains in debug
 #[cfg(debug_assertions)]
-const TABLE_NAME: &str = "domainsDev";
-// table name for domains in release
+const DOMAINS_COLLECTION: &str = "domainsDev";
+// collection for domains in release
 #[cfg(not(debug_assertions))]
-const TABLE_NAME: &str = "domains";
-// table name for auth codes
-const AUTH_TABLE_NAME: &str = "auth";
+const DOMAINS_COLLECTION: &str = "domains";
+// collection for auth codes
+const AUTH_COLLECTION: &str = "auth";
 
 #[get("/<name>")]
 async fn redirector(name: String) -> Redirect {
-    let conn = match Conn::new().await {
+    let col = connect().await.collection::<Domain>(DOMAINS_COLLECTION);
+    let filter = doc! { "name" : name };
+    let mut cursor = match col.find(filter, None).await {
         Ok(c) => c,
-        Err(e) => {
-            println!("{}", e);
-            return Redirect::to(DOMAIN);
-        }
+        Err(_) => return Redirect::to(DOMAIN)
     };
-    // let route_value = serde_json::from_str(&format!(r#"{{"name":"{}"}}"#, name)).unwrap();
-    // let route_value = |a: Domain| a.name == name;
-    let route = conn.get_filtered_for_domain(DATABASE_NAME, TABLE_NAME, name).await;
-    if route.len() == 1 {
-        let r = match route.get(0) {
-            None => DOMAIN.to_string(),
-            Some(d) => d.clone().domain
-        };
-        Redirect::to(r)
-    } else {
-        Redirect::to(DOMAIN)
+    let dom = match cursor.try_next().await {
+        Ok(c) => c,
+        Err(_) => return Redirect::to(DOMAIN)
+    };
+    match dom {
+        Some(d) => Redirect::to(d.domain),
+        None => return Redirect::to(DOMAIN)
     }
 }
 
