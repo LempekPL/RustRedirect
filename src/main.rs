@@ -30,17 +30,13 @@ const AUTH_COLLECTION: &str = "auth";
 async fn redirector(name: String) -> Redirect {
     let col = connect().await.collection::<Domain>(DOMAINS_COLLECTION);
     let filter = doc! { "name" : name };
-    let mut cursor = match col.find(filter, None).await {
-        Ok(c) => c,
+    let dom = match col.find_one(filter, None).await {
+        Ok(d) => d,
         Err(_) => return Redirect::to(DOMAIN)
     };
-    let dom = match cursor.try_next().await {
-        Ok(c) => c,
-        Err(_) => return Redirect::to(DOMAIN)
-    };
-    match dom {
+    return match dom {
         Some(d) => Redirect::to(d.domain),
-        None => return Redirect::to(DOMAIN)
+        None => Redirect::to(DOMAIN)
     }
 }
 
