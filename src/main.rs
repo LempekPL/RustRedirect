@@ -8,10 +8,7 @@ mod database;
 extern crate rocket;
 
 use mongodb::bson::doc;
-use mongodb::error::Error;
-use rocket::futures::TryStreamExt;
 use rocket::response::Redirect;
-use serde_json::Value;
 use crate::api::v1::mount_v1;
 use crate::database::{connect, Domain};
 
@@ -34,7 +31,7 @@ async fn redirector(name: String) -> Redirect {
         Ok(d) => d,
         Err(_) => return Redirect::to(DOMAIN)
     };
-    return match dom {
+    match dom {
         Some(d) => Redirect::to(d.domain),
         None => Redirect::to(DOMAIN)
     }
