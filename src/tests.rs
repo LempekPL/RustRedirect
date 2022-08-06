@@ -3,9 +3,10 @@ extern crate rocket;
 use reql::r;
 use rocket::{Build, Rocket, futures::TryStreamExt};
 use serde_json::Value;
-use crate::{TABLE_NAME, DATABASE_NAME, index, redirector, get_conn, mount_v1};
+use crate::{TABLE_NAME, DATABASE_NAME, index, redirector, mount_v1};
 
 async fn rocket_build() -> Rocket<Build> {
+
     let conn = match get_conn().await {
         Ok(conn) => conn,
         Err(_) => panic!("Can't connect to the database")

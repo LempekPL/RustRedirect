@@ -1,11 +1,9 @@
-use reql::r;
 use rocket::{Build, Rocket};
 use rocket::futures::TryStreamExt;
 use serde::Serialize;
 use rocket::serde::json::Json;
-use serde_json::Value;
-use crate::{DATABASE_NAME, Domain, TABLE_NAME};
-use crate::database::Conn;
+use serde_json::{Error, Value};
+use crate::{connect, DATABASE_NAME, Domain, DOMAINS_COLLECTION};
 
 #[derive(Serialize)]
 struct Response {
@@ -33,28 +31,42 @@ pub(crate) fn mount_v1(rocket: Rocket<Build>) -> Rocket<Build> {
 
 #[get("/")]
 async fn check_domains() -> Json<Response> {
-    let conn = match Conn::new().await {
-        Ok(conn) => conn,
-        Err(_) => return Json(Response {
-            success: false,
-            response: Value::String("Server error. Can't connect to the database. Contact the developer".to_string()),
-        })
+    let col = connect().await.collection::<Domain>(DOMAINS_COLLECTION);
+    let cursor = match col.find(None, None).await {
+        Ok(c) => c,
+        Err(e) => {
+            println!("[38 line v1.rs] {:?}", *e.kind);
+            return Json(Response {
+                success: false,
+                response: Value::String("Could not process (server error)".to_string()),
+            });
+        },
     };
-    let mut query = r
-        .db(DATABASE_NAME)
-        .table(TABLE_NAME)
-        .run::<_, Domain>(&conn);
-    let mut domains: Vec<Value> = vec![];
-    while let Ok(domain) = query.try_next().await {
-        if let Some(domain) = domain {
-            domains.push(serde_json::to_value(domain).unwrap());
-        } else {
-            break;
-        }
+    let cursor: Vec<Domain> = match cursor.try_collect().await {
+        Ok(c) => c,
+        Err(e) => {
+            println!("[48 line v1.rs] {:?}", *e.kind);
+            return Json(Response {
+                success: false,
+                response: Value::String("Could not process (server error)".to_string()),
+            });
+        },
     };
+    let cursor = match serde_json::to_value(cursor) {
+        Ok(c) => c,
+        Err(e) => {
+            println!("[58 line v1.rs] {:?}", e.to_string());
+            return Json(Response {
+                success: false,
+                response: Value::String("Could not process (server error)".to_string()),
+            });
+        },
+    };
+
+
     Json(Response {
         success: true,
-        response: Value::Array(domains),
+        response: cursor,
     })
 }
 

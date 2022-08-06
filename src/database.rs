@@ -2,6 +2,8 @@ use mongodb::{Client, Database};
 use mongodb::error::ErrorKind;
 use mongodb::options::ClientOptions;
 use rocket::Config;
+use rocket::tokio::join;
+use serde::{Serialize, Deserialize};
 use crate::{AUTH_COLLECTION, DATABASE_NAME, DOMAINS_COLLECTION};
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -66,8 +68,9 @@ pub(crate) async fn connect() -> Database {
 pub(crate) async fn manage_database() {
     let db = connect().await;
 
-    create_collection_unless(&db, DOMAINS_COLLECTION);
-    create_collection_unless(&db, AUTH_COLLECTION);
+    let create_domains = create_collection_unless(&db, DOMAINS_COLLECTION);
+    let create_auths = create_collection_unless(&db, AUTH_COLLECTION);
+    join!(create_domains, create_auths);
 
     // add default auth if not found any
     let a_col = db.collection::<Auth>(AUTH_COLLECTION);
