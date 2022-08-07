@@ -23,8 +23,8 @@
   {  
     "success": true,
     "response": [
-      { "id": 1, "name":"example", "domain":"https://example.com" },
-      { "id": 2, "name":"lk", "domain":"https://lmpk.tk" }
+      { "name":"example", "domain":"https://example.com", "owner": {"$oid": "62ef10543db77254ebbg48a3"} },
+      { "name":"lk", "domain":"https://lmpk.tk", "owner": {"$oid": "gbhs6fd4f8b413gffd1sef44"} }
     ]
   }
   ```
@@ -32,7 +32,7 @@
   Params:
   name - string, domain - string\
   Hearders:
-  Authorization - string key\
+  name - string (name of token, not domain), token - string\
   Response: JSON\
   Object{ success: bool, response: string }\
   \
@@ -40,13 +40,13 @@
   ```json
   {  
     "success": true,
-    "response": "Created redirect to <domain> named <name>"
+    "response": "Created redirect to '<domain>' named '<name>'. Using token named: '<auth token name>'"
   }
   ```
   Example of unsuccessful response
   ```json
   {  
     "success": false,
-    "response": "Server error. Can't connect to the database. Contact the developer"
+    "response": "Could not create redirect."
   }
   ```

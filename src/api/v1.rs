@@ -1,5 +1,5 @@
 use std::fmt::Debug;
-use bcrypt::{BcryptResult, verify};
+use bcrypt::verify;
 use mongodb::bson::doc;
 use mongodb::Cursor;
 use rocket::{Build, Request, request, Rocket};
@@ -92,12 +92,12 @@ async fn create_redirect(name: Option<String>, domain: Option<String>, auth: Aut
 }
 
 #[put("/edit?<name>&<domain>")]
-fn edit_redirect(name: Option<String>, domain: Option<String>) -> &'static str {
+fn edit_redirect(name: Option<String>, domain: Option<String>, auth: Auth) -> &'static str {
     "Hello, world!"
 }
 
 #[delete("/delete?<name>")]
-fn remove_redirect(name: Option<String>) -> &'static str {
+fn remove_redirect(name: Option<String>, auth: Auth) -> &'static str {
     "Hello, world!"
 }
 

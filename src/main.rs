@@ -70,7 +70,10 @@ macro_rules! ok_return {
     ( $e:expr, $r:expr ) => {
         match $e {
             Ok(x) => x,
-            Err(_) => return $r,
+            Err(e) => {
+                println!("{:?}", e);
+                return $r;
+            },
         }
     }
 }
