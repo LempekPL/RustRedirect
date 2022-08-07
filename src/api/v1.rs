@@ -9,7 +9,7 @@ use rocket::request::FromRequest;
 use serde::Serialize;
 use rocket::serde::json::Json;
 use serde_json::Value;
-use crate::{AUTH_COLLECTION, connect, Domain, DOMAINS_COLLECTION};
+use crate::{AUTH_COLLECTION, connect, Domain, DOMAINS_COLLECTION, reowrap, rerwrap};
 use crate::database::Auth;
 
 #[derive(Serialize)]
@@ -164,7 +164,44 @@ fn remove_redirect(name: Option<String>) -> &'static str {
     "Hello, world!"
 }
 
-// info paths
+#[rocket::async_trait]
+impl<'a> FromRequest<'a> for Auth {
+    type Error = AuthError;
+
+    async fn from_request(request: &'a Request<'_>) -> request::Outcome<Self, Self::Error> {
+        let name: &str = reowrap!(request.headers().get_one("name"), Outcome::Failure((Status::BadRequest, AuthError::MissingName)));
+        let token: &str = reowrap!(request.headers().get_one("token"), Outcome::Failure((Status::BadRequest, AuthError::MissingToken)));
+        // connect to database and select auth collection
+        let col = connect().await.collection::<Auth>(AUTH_COLLECTION);
+        let found: Option<Auth> = rerwrap!(col.find_one(doc! {"name": name}, None).await, Outcome::Failure((Status::InternalServerError, AuthError::ServerError)));
+        let auth: Auth = reowrap!(found, Outcome::Failure((Status::Unauthorized, AuthError::NotFound)));
+        let ver: bool = rerwrap!(verify(token, &auth.token), Outcome::Failure((Status::Unauthorized, AuthError::Unknown)));
+        return if ver {
+            Outcome::Success(auth)
+        } else {
+            Outcome::Failure((Status::Unauthorized, AuthError::Invalid))
+        }
+    }
+}
+
+/////////////
+// ERRORS
+/////////////
+
+#[derive(Debug)]
+pub(crate) enum AuthError {
+    MissingToken,
+    MissingName,
+    Invalid,
+    ServerError,
+    NotFound,
+    Unknown,
+}
+
+//////////////////
+// INFO PATHS
+//////////////////
+
 #[get("/create")]
 fn i_create_post() -> Json<Response> {
     Json(Response {
@@ -195,58 +232,4 @@ fn i_random_post() -> Json<Response> {
         success: false,
         response: Value::String("Use post".to_string()),
     })
-}
-
-#[derive(Debug)]
-pub(crate) enum AuthError {
-    MissingToken,
-    MissingName,
-    Invalid,
-    ServerError,
-    NotFound,
-    Unknown,
-}
-
-#[rocket::async_trait]
-impl<'a> FromRequest<'a> for Auth {
-    type Error = AuthError;
-
-    async fn from_request(request: &'a Request<'_>) -> request::Outcome<Self, Self::Error> {
-        let name = match request.headers().get_one("name") {
-            None => return Outcome::Failure((Status::BadRequest, AuthError::MissingName)),
-            Some(n) => n
-        };
-        // connect to the database and select auth collection
-        let col = connect().await.collection::<Auth>(AUTH_COLLECTION);
-        // check for auth
-        let found = match col.find_one(doc! {"name": name}, None).await {
-            Ok(f) => f,
-            Err(e) => {
-                println!("Error while getting data: {:?}", *e.kind);
-                return Outcome::Failure((Status::InternalServerError, AuthError::ServerError));
-            }
-        };
-        let auth = match found {
-            None => return Outcome::Failure((Status::Unauthorized, AuthError::NotFound)),
-            Some(t) => Auth { name: t.name, token: t.token, permission: t.permission },
-        };
-        let token = request.headers().get_one("token");
-        let auth = match token {
-            None => return Outcome::Failure((Status::Unauthorized, AuthError::MissingToken)),
-            Some(token)  => {
-                let ver = verify(token, &auth.token);
-                match ver {
-                    Ok(ok) => {
-                        if ok {
-                            auth
-                        } else {
-                            return Outcome::Failure((Status::Unauthorized, AuthError::Invalid))
-                        }
-                    }
-                    Err(_) => return Outcome::Failure((Status::Unauthorized, AuthError::Unknown))
-                }
-            }
-        };
-        Outcome::Success(auth)
-    }
 }
