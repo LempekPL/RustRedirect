@@ -57,7 +57,7 @@ async fn main() -> Result<(), rocket::Error> {
     Ok(())
 }
 
-macro_rules! reowrap {
+macro_rules! some_return {
     ( $e:expr, $r:expr ) => {
         match $e {
             Some(x) => x,
@@ -66,7 +66,7 @@ macro_rules! reowrap {
     }
 }
 
-macro_rules! rerwrap {
+macro_rules! ok_return {
     ( $e:expr, $r:expr ) => {
         match $e {
             Ok(x) => x,
@@ -75,5 +75,5 @@ macro_rules! rerwrap {
     }
 }
 
-pub(crate) use reowrap;
-pub(crate) use rerwrap;
+pub(crate) use some_return;
+pub(crate) use ok_return;

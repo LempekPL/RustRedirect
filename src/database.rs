@@ -1,4 +1,5 @@
 use mongodb::{Client, Database};
+use mongodb::bson::oid::ObjectId;
 use mongodb::error::ErrorKind;
 use mongodb::options::ClientOptions;
 use rocket::Config;
@@ -10,10 +11,12 @@ use crate::{AUTH_COLLECTION, DATABASE_NAME, DOMAINS_COLLECTION};
 pub(crate) struct Domain {
     pub(crate) name: String,
     pub(crate) domain: String,
+    pub(crate) owner: ObjectId,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
 pub(crate) struct Auth {
+    pub(crate) _id: ObjectId,
     pub(crate) name: String,
     pub(crate) token: String,
     pub(crate) permission: Permission,
@@ -79,6 +82,7 @@ pub(crate) async fn manage_database() {
         if count == 0 {
             let h = bcrypt::hash("pass", bcrypt::DEFAULT_COST).expect("Could not hash");
             a_col.insert_one(Auth {
+                _id: Default::default(),
                 name: "admin".to_string(),
                 token: h,
                 permission: Permission(1, 0, 0, 0, 0),
