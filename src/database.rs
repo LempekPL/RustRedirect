@@ -16,6 +16,7 @@ pub(crate) struct Domain {
 pub(crate) struct Auth {
     pub(crate) name: String,
     pub(crate) token: String,
+    pub(crate) permission: Permission,
 }
 
 #[derive(Deserialize)]
@@ -76,9 +77,11 @@ pub(crate) async fn manage_database() {
     let a_col = db.collection::<Auth>(AUTH_COLLECTION);
     if let Ok(count) = a_col.count_documents(None, None).await {
         if count == 0 {
+            let h = bcrypt::hash("pass", bcrypt::DEFAULT_COST).expect("Could not hash");
             a_col.insert_one(Auth {
                 name: "admin".to_string(),
-                token: "pass".to_string()
+                token: h,
+                permission: Permission(1, 0, 0, 0, 0),
             }, None).await.expect("Could not create default user");
             println!("No auth found, created new auth");
         }
@@ -98,5 +101,66 @@ async fn create_collection_unless(db: &Database, name: &str) {
                 }
             }
         }
+    }
+}
+
+// Permission(0, 0, 0, 0, 0)
+// 0 - full admin
+// 1 - edit(only name and password) own auth
+// 2 - edit/delete/list other redirects
+// 3 - create/edit/delete/list own redirects
+// 4 - create random named redirects
+
+#[derive(Deserialize, Serialize, Debug)]
+pub(crate) struct Permission(u8, u8, u8, u8, u8);
+
+impl Permission {
+    pub(crate) fn to_u8(self) -> u8 {
+        self.0 * 16 + self.1 * 8 + self.2 * 4 + self.3 * 2 + self.4
+    }
+
+    // can do anything they want
+    pub(crate) fn can_admin(&self) -> bool {
+        self.0 == 1
+    }
+
+    // can edit self auth (only name and password)
+    pub(crate) fn can_self(&self) -> bool {
+        self.1 == 1 || self.can_admin()
+    }
+
+    // can edit/delete other redirects
+    pub(crate) fn can_other(&self) -> bool {
+        self.2 == 1 || self.can_admin()
+    }
+
+    // can create/edit/delete/list own redirects
+    pub(crate) fn can_own(&self) -> bool {
+        self.3 == 1 || self.can_admin()
+    }
+
+    // can create random named redirects
+    pub(crate) fn can_random(&self) -> bool {
+        self.4 == 1 || self.can_admin()
+    }
+
+    pub(crate) fn from_u8(mut num: u8) -> Permission {
+        let mut arr: [u8; 5] = [0; 5];
+        for n in (0..5).rev() {
+            let b = 2_u8.pow(n as u32);
+            (arr[4 - n], num) = {
+                let b = num % b;
+                if b != num {
+                    (1, b)
+                } else {
+                    (0, b)
+                }
+            }
+        }
+        Permission(arr[0], arr[1], arr[2], arr[3], arr[4])
+    }
+
+    pub(crate) fn from_arr(nums: [u8; 5]) -> Permission {
+        Permission(nums[0], nums[1], nums[2], nums[3], nums[4])
     }
 }

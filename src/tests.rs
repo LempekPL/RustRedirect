@@ -1,32 +1,12 @@
 extern crate rocket;
 
-use reql::r;
 use rocket::{Build, Rocket, futures::TryStreamExt};
 use serde_json::Value;
-use crate::{TABLE_NAME, DATABASE_NAME, index, redirector, mount_v1};
+use crate::{index, redirector, mount_v1};
+use crate::database::manage_database;
 
 async fn rocket_build() -> Rocket<Build> {
-
-    let conn = match get_conn().await {
-        Ok(conn) => conn,
-        Err(_) => panic!("Can't connect to the database")
-    };
-    // create database if needed
-    let mut query = r
-        .db_create(DATABASE_NAME)
-        .run::<_, Value>(&conn);
-    if query.try_next().await.is_ok() {
-        println!("Database created");
-    }
-    // create table if needed
-    let mut query = r
-        .db(DATABASE_NAME)
-        .table_create(TABLE_NAME)
-        .run::<_, Value>(&conn);
-    if query.try_next().await.is_ok() {
-        println!("Table created");
-    }
-
+    manage_database().await;
     // build, mount and launch
     let rocket = rocket::build()
         .mount("/", routes![index])
@@ -40,6 +20,7 @@ mod test {
     use rocket::local::asynchronous::Client;
     use rocket::http::Status;
     use serde_json::Value;
+    use crate::database::to_permission;
     use crate::tests::rocket_build;
 
     #[rocket::async_test]
@@ -59,5 +40,25 @@ mod test {
         let example_list: Value = serde_json::from_str(example_list).unwrap();
         let res: Value = serde_json::from_str(&response.into_string().await.unwrap()).unwrap();
         assert_eq!(example_list, res);
+    }
+
+    #[rocket::async_test]
+    async fn create_redirect_delete() {
+
+    }
+
+    #[rocket::async_test]
+    async fn create_edit_delete() {
+
+    }
+
+    #[rocket::async_test]
+    async fn create_edit_redirect_delete() {
+
+    }
+
+    #[rocket::async_test]
+    async fn create_more_edit_list_delete() {
+
     }
 }
