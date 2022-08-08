@@ -1,3 +1,4 @@
+use std::process;
 use mongodb::{Client, Database};
 use mongodb::bson::oid::ObjectId;
 use mongodb::error::ErrorKind;
@@ -22,7 +23,7 @@ pub(crate) struct Auth {
     pub(crate) permission: Permission,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 struct MoConfig {
     db_host: String,
     db_port: u16,
@@ -41,6 +42,33 @@ impl Default for MoConfig {
     }
 }
 
+pub(crate) async fn connect() -> Database {
+    let conf = match Config::figment().extract::<MoConfig>() {
+        Ok(conf) => conf,
+        Err(_) => {
+            println!("Database config not found. Using default values");
+            MoConfig::default()
+        }
+    };
+    let client = re_conn(conf, 3).await;
+    client.database(DATABASE_NAME)
+}
+
+#[async_recursion::async_recursion]
+async fn re_conn(config: MoConfig, tries: u8) -> Client {
+    match connect_to_database(config.clone()).await {
+        Ok(c) => c,
+        Err(e) => {
+            if tries == 0 {
+                println!("Could not connect to the database: {:?} \n\x1b[31mTerminating process\x1b[0m", *e.kind);
+                process::exit(1);
+            }
+            println!("Could not connect to the database: {:?} \x1b[34m(Remaining tries: {})\x1b[0m", *e.kind, tries);
+            re_conn(config, tries - 1).await
+        }
+    }
+}
+
 async fn connect_to_database(config: MoConfig) -> mongodb::error::Result<Client> {
     // TODO: ability to use url
     let mut client_options = ClientOptions::parse(
@@ -52,28 +80,33 @@ async fn connect_to_database(config: MoConfig) -> mongodb::error::Result<Client>
     Ok(client)
 }
 
-pub(crate) async fn connect() -> Database {
-    let conf = match Config::figment().extract::<MoConfig>() {
-        Ok(conf) => conf,
-        Err(_) => {
-            println!("Database config not found. Using default values");
-            MoConfig::default()
-        }
-    };
-    let client = match connect_to_database(conf).await {
-        Ok(c) => c,
+#[async_recursion::async_recursion]
+async fn create_collection_unless(db: &Database, name: &str, tries: u8) {
+    match db.create_collection(name, None).await {
+        Ok(_) => println!("Created collection {}", name),
         Err(e) => {
-            panic!("Could not connect to the database: {:?}", *e.kind);
+            match *e.kind {
+                ErrorKind::Command(c) if c.code == 48 => {
+                    println!("Collection '{}' already exists", name)
+                }
+                _ => {
+                    if tries == 0 {
+                        println!("Could not create collection: {:?} \n\x1b[31mTerminating process\x1b[0m", *e.kind);
+                        process::exit(1);
+                    }
+                    println!("Could not create collection: {:?} \x1b[34m(Remaining tries: {})\x1b[0m", *e.kind, tries);
+                    create_collection_unless(db, name, tries - 1).await;
+                }
+            }
         }
-    };
-    client.database(DATABASE_NAME)
+    }
 }
 
 pub(crate) async fn manage_database() {
     let db = connect().await;
 
-    let create_domains = create_collection_unless(&db, DOMAINS_COLLECTION);
-    let create_auths = create_collection_unless(&db, AUTH_COLLECTION);
+    let create_domains = create_collection_unless(&db, DOMAINS_COLLECTION, 3);
+    let create_auths = create_collection_unless(&db, AUTH_COLLECTION, 3);
     join!(create_domains, create_auths);
 
     // add default auth if not found any
@@ -88,22 +121,6 @@ pub(crate) async fn manage_database() {
                 permission: Permission(1, 0, 0, 0, 0),
             }, None).await.expect("Could not create default user");
             println!("No auth found, created new auth");
-        }
-    }
-}
-
-async fn create_collection_unless(db: &Database, name: &str) {
-    match db.create_collection(name, None).await {
-        Ok(_) => println!("Created collection {}", name),
-        Err(e) => {
-            match *e.kind {
-                ErrorKind::Command(c) if c.code == 48 => {
-                    println!("Collection '{}' already exists", name)
-                }
-                _ => {
-                    panic!("Could not create collection: {:?}", *e.kind)
-                }
-            }
         }
     }
 }
