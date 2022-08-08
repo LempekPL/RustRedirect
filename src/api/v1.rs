@@ -43,15 +43,25 @@ pub(crate) fn mount_v1(rocket: Rocket<Build>) -> Rocket<Build> {
 }
 
 #[get("/")]
-async fn check_domains() -> Json<Response> {
-    let col = connect().await.collection::<Domain>(DOMAINS_COLLECTION);
-    let cursor: Cursor<Domain> = ok_return!(col.find(None, None).await, Json(Response::DATABASE_WHILST_TRYING_TO_FIND()));
-    let collected: Vec<Domain> = ok_return!(cursor.try_collect().await, Json(Response::DATABASE_WHILST_TRYING_TO_COLLECT()));
-    let collected: Value = ok_return!(serde_json::to_value(collected), Json(Response::SERVER_WHILST_TRYING_TO_FORMAT()));
-    Json(Response {
+async fn check_domains(auth: Auth) -> Json<Response> {
+    let conn = connect().await;
+    let col = conn.collection::<Domain>(DOMAINS_COLLECTION);
+    // check if user has enough permissions to list all/own redirects
+    let cursor;
+    if auth.permission.can_other() {
+        cursor = col.find(None, None).await;
+    } else if auth.permission.can_own() {
+        cursor = col.find(doc! { "owner": auth._id }, None).await;
+    } else {
+        return Response::PERMISSIONS_TOO_LOW().json();
+    }
+    let cursor = ok_return!(cursor, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
+    let collected: Vec<Domain> = ok_return!(cursor.try_collect().await, Response::DATABASE_WHILST_TRYING_TO_COLLECT().json());
+    let collected = ok_return!(serde_json::to_value(collected), Response::SERVER_WHILST_TRYING_TO_FORMAT().json());
+    Response {
         success: true,
         response: collected,
-    })
+    }.json()
 }
 
 #[post("/random?<domain>")]
@@ -67,14 +77,14 @@ fn random_redirect(domain: Option<String>, auth: Auth) -> Json<Response> {
 
 #[post("/create?<name>&<domain>")]
 async fn create_redirect(name: Option<String>, domain: Option<String>, auth: Auth) -> Json<Response> {
-    let name: String = some_return!(name, Json(Response::USER_DID_NOT_PROVIDE_PARAM("name")));
-    let domain: String = some_return!(domain, Json(Response::USER_DID_NOT_PROVIDE_PARAM("domain")));
+    let name = some_return!(name, Response::USER_DID_NOT_PROVIDE_PARAM("name").json());
+    let domain = some_return!(domain, Response::USER_DID_NOT_PROVIDE_PARAM("domain").json());
 
     if auth.permission.can_own() {
         let db = connect().await.collection::<Domain>(DOMAINS_COLLECTION);
-        let dom: Option<Domain> = ok_return!(db.find_one(doc! { "name" : name.clone() }, None).await, Json(Response::DATABASE_WHILST_TRYING_TO_FIND()));
+        let dom: Option<Domain> = ok_return!(db.find_one(doc! { "name" : name.clone() }, None).await, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
         if dom.is_some() {
-            return Json(Response::REDIRECT_ALREADY_EXIST());
+            return Response::REDIRECT_ALREADY_EXIST().json();
         }
         let res = db.insert_one(
             Domain {
@@ -83,11 +93,11 @@ async fn create_redirect(name: Option<String>, domain: Option<String>, auth: Aut
                 owner: auth._id
             }, None).await;
         return match res {
-            Ok(_) => Json(Response::new(true, &format!("Created redirect to '{}' named '{}'. Using token named: {}", domain, name, auth.name))),
-            Err(_) => Json(Response::COULD_NOT_CREATE_REDIRECT())
+            Ok(_) => Response::new(true, &format!("Created redirect to '{}' named '{}'. Using token named: {}", domain, name, auth.name)).json(),
+            Err(_) => Response::COULD_NOT_CREATE_REDIRECT().json()
         };
     } else {
-        Json(Response::PERMISSIONS_TOO_LOW())
+        Response::PERMISSIONS_TOO_LOW().json()
     }
 }
 
@@ -133,6 +143,10 @@ impl Response {
         }
     }
 
+    fn json(self) -> Json<Self> {
+        Json(self)
+    }
+
     const DATABASE_WHILST_TRYING_TO_FIND: fn() -> Response = || Response::new(false, "Database error whilst trying to find.");
     const DATABASE_WHILST_TRYING_TO_COLLECT: fn() -> Response = || Response::new(false, "Database error whilst trying to collect data.");
     const SERVER_WHILST_TRYING_TO_FORMAT: fn() -> Response = || Response::new(false, "Server error whilst response formatting.");
@@ -141,7 +155,6 @@ impl Response {
     const REDIRECT_ALREADY_EXIST: fn() -> Response = || Response::new(false, "Redirect with that name already exists");
     const COULD_NOT_CREATE_REDIRECT: fn() -> Response = || Response::new(false, "Could not create redirect.");
 }
-
 
 /////////////
 // ERRORS
