@@ -102,8 +102,32 @@ async fn create_redirect(name: Option<String>, domain: Option<String>, auth: Aut
 }
 
 #[put("/edit?<name>&<domain>")]
-fn edit_redirect(name: Option<String>, domain: Option<String>, auth: Auth) -> &'static str {
-    "Hello, world!"
+fn edit_redirect(name: Option<String>, domain: Option<String>, auth: Auth) -> Json<Response> {
+    let name = some_return!(name, Response::USER_DID_NOT_PROVIDE_PARAM("name").json());
+    let domain = some_return!(domain, Response::USER_DID_NOT_PROVIDE_PARAM("domain").json());
+
+    if auth.permission.can_other() {
+        let db = connect().await.collection::<Domain>(DOMAINS_COLLECTION);
+        let mut dom: Option<Domain> = ok_return!(db.find_one(doc! { "name" : name.clone() }, None).await, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
+        if dom.is_none() {
+            dom = ok_return!(db.find_one(doc! { "domain" : domain.clone() }, None).await, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
+        }
+        let dom = match dom {
+            None => return Response::REDIRECT_DOESNT_EXIST().json(),
+            Some(d) => d
+        };
+        let new = Domain {
+            name,
+            domain,
+            owner: dom.owner
+        };
+        db.update_one(doc! { "domain" : dom.domain.clone() }, new, None);
+        Response::new(true, &format!("Edited redirect")).json()
+    } else if auth.permission.can_own() {
+        todo!()
+    } else {
+        Response::PERMISSIONS_TOO_LOW().json()
+    }
 }
 
 #[delete("/delete?<name>")]
@@ -154,6 +178,7 @@ impl Response {
     const PERMISSIONS_TOO_LOW: fn() -> Response = || Response::new(false, "Could not do that. Permissions too low.");
     const REDIRECT_ALREADY_EXIST: fn() -> Response = || Response::new(false, "Redirect with that name already exists");
     const COULD_NOT_CREATE_REDIRECT: fn() -> Response = || Response::new(false, "Could not create redirect.");
+    const REDIRECT_DOESNT_EXIST: fn() -> Response = || Response::new(false, "Redirect doesn't exists");
 }
 
 /////////////
