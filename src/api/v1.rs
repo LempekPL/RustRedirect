@@ -48,7 +48,7 @@ async fn check_domains(auth: Auth) -> Json<Response> {
     let col = conn.collection::<Domain>(DOMAINS_COLLECTION);
     // check if user has enough permissions to list all/own redirects
     let cursor;
-    if auth.permission.can_other() {
+    if auth.permission.can_list() {
         cursor = col.find(None, None).await;
     } else if auth.permission.can_own() {
         cursor = col.find(doc! { "owner": auth._id }, None).await;
@@ -88,9 +88,10 @@ async fn create_redirect(name: Option<String>, domain: Option<String>, auth: Aut
         }
         let res = db.insert_one(
             Domain {
+                _id: Default::default(),
                 name: name.clone(),
                 domain: domain.clone(),
-                owner: auth._id
+                owner: auth._id,
             }, None).await;
         return match res {
             Ok(_) => Response::new(true, &format!("Created redirect to '{}' named '{}'. Using token named: {}", domain, name, auth.name)).json(),
@@ -101,32 +102,47 @@ async fn create_redirect(name: Option<String>, domain: Option<String>, auth: Aut
     }
 }
 
-#[put("/edit?<name>&<domain>")]
-fn edit_redirect(name: Option<String>, domain: Option<String>, auth: Auth) -> Json<Response> {
+#[put("/edit?<name>&<newname>&<domain>")]
+async fn edit_redirect(name: Option<String>, newname: Option<String>, domain: Option<String>, auth: Auth) -> Json<Response> {
     let name = some_return!(name, Response::USER_DID_NOT_PROVIDE_PARAM("name").json());
-    let domain = some_return!(domain, Response::USER_DID_NOT_PROVIDE_PARAM("domain").json());
+    let db = connect().await.collection::<Domain>(DOMAINS_COLLECTION);
+    let search_name;
 
-    if auth.permission.can_other() {
-        let db = connect().await.collection::<Domain>(DOMAINS_COLLECTION);
-        let mut dom: Option<Domain> = ok_return!(db.find_one(doc! { "name" : name.clone() }, None).await, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
-        if dom.is_none() {
-            dom = ok_return!(db.find_one(doc! { "domain" : domain.clone() }, None).await, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
-        }
-        let dom = match dom {
-            None => return Response::REDIRECT_DOESNT_EXIST().json(),
-            Some(d) => d
-        };
-        let new = Domain {
-            name,
-            domain,
-            owner: dom.owner
-        };
-        db.update_one(doc! { "domain" : dom.domain.clone() }, new, None);
-        Response::new(true, &format!("Edited redirect")).json()
+    if auth.permission.can_mod() {
+        search_name = doc! { "name": name.clone() }
     } else if auth.permission.can_own() {
-        todo!()
+        search_name = doc! { "name": name.clone(), "owner": auth._id }
     } else {
-        Response::PERMISSIONS_TOO_LOW().json()
+        return Response::PERMISSIONS_TOO_LOW().json();
+    }
+    let mut dom: Option<Domain> = ok_return!(db.find_one(search_name, None).await, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
+    let dom = match dom {
+        None => return Response::REDIRECT_DOESNT_EXIST().json(),
+        Some(d) => d
+    };
+    let res = db
+        .update_one(
+            doc! { "_id" : dom._id },
+            doc! { "$set": { "name": newname.clone().unwrap_or(name.clone()), "domain": domain.clone().unwrap_or(dom.domain.clone()) } },
+            None)
+        .await;
+    match res {
+        Ok(m) if m.modified_count > 0 => {
+            match (newname.clone(), domain.clone()) {
+                (n, d) if n.is_some() && d.is_some() => {
+                    Response::new(true, &format!("Edited redirect. Name '{}' -> '{}' and domain '{}' -> '{}'", name, newname.unwrap(), dom.domain, domain.unwrap())).json()
+                }
+                (n, d) if n.is_none() && d.is_some() => {
+                    Response::new(true, &format!("Edited redirect. Domain '{}' -> '{}'", dom.domain, domain.unwrap())).json()
+                }
+                (n, d) if n.is_some() && d.is_none() => {
+                    Response::new(true, &format!("Edited redirect. Name '{}' -> '{}'", name, newname.unwrap())).json()
+                }
+                _ => Response::NOTHING_CHANGED().json()
+            }
+        }
+        Ok(_) => Response::NOTHING_CHANGED().json(),
+        Err(_) => Response::COULD_NOT_EDIT_REDIRECT().json()
     }
 }
 
@@ -174,11 +190,13 @@ impl Response {
     const DATABASE_WHILST_TRYING_TO_FIND: fn() -> Response = || Response::new(false, "Database error whilst trying to find.");
     const DATABASE_WHILST_TRYING_TO_COLLECT: fn() -> Response = || Response::new(false, "Database error whilst trying to collect data.");
     const SERVER_WHILST_TRYING_TO_FORMAT: fn() -> Response = || Response::new(false, "Server error whilst response formatting.");
-    const USER_DID_NOT_PROVIDE_PARAM: fn(&str) -> Response = |param: &str| Response::new(false, &format!("User error, did not provide '{}' param", param));
+    const USER_DID_NOT_PROVIDE_PARAM: fn(&str) -> Response = |param: &str| Response::new(false, &format!("User error, did not provide '{}' param.", param));
     const PERMISSIONS_TOO_LOW: fn() -> Response = || Response::new(false, "Could not do that. Permissions too low.");
-    const REDIRECT_ALREADY_EXIST: fn() -> Response = || Response::new(false, "Redirect with that name already exists");
+    const REDIRECT_ALREADY_EXIST: fn() -> Response = || Response::new(false, "Redirect with that name already exists.");
+    const REDIRECT_DOESNT_EXIST: fn() -> Response = || Response::new(false, "Redirect doesn't exists.");
     const COULD_NOT_CREATE_REDIRECT: fn() -> Response = || Response::new(false, "Could not create redirect.");
-    const REDIRECT_DOESNT_EXIST: fn() -> Response = || Response::new(false, "Redirect doesn't exists");
+    const COULD_NOT_EDIT_REDIRECT: fn() -> Response = || Response::new(false, "Could not edit redirect.");
+    const NOTHING_CHANGED: fn() -> Response = || Response::new(false, "Nothing changed.");
 }
 
 /////////////

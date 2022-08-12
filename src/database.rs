@@ -10,6 +10,7 @@ use crate::{AUTH_COLLECTION, DATABASE_NAME, DOMAINS_COLLECTION};
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub(crate) struct Domain {
+    pub(crate) _id: ObjectId,
     pub(crate) name: String,
     pub(crate) domain: String,
     pub(crate) owner: ObjectId,
@@ -127,8 +128,8 @@ pub(crate) async fn manage_database() {
 
 // Permission(0, 0, 0, 0, 0)
 // 0 - full admin
-// 1 - edit(only name and password) own auth
-// 2 - edit/delete/list other redirects
+// 1 - edit(only name and password) own auth and edit/delete all redirects
+// 2 - list all redirects
 // 3 - create/edit/delete/list own redirects
 // 4 - create random named redirects
 
@@ -146,12 +147,12 @@ impl Permission {
     }
 
     // can edit self auth (only name and password)
-    pub(crate) fn can_self(&self) -> bool {
+    pub(crate) fn can_mod(&self) -> bool {
         self.1 == 1 || self.can_admin()
     }
 
     // can edit/delete other redirects
-    pub(crate) fn can_other(&self) -> bool {
+    pub(crate) fn can_list(&self) -> bool {
         self.2 == 1 || self.can_admin()
     }
 
