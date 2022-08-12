@@ -147,8 +147,29 @@ async fn edit_redirect(name: Option<String>, newname: Option<String>, domain: Op
 }
 
 #[delete("/delete?<name>")]
-fn remove_redirect(name: Option<String>, auth: Auth) -> &'static str {
-    "Hello, world!"
+async fn remove_redirect(name: Option<String>, auth: Auth) -> Json<Response> {
+    let name = some_return!(name, Response::USER_DID_NOT_PROVIDE_PARAM("name").json());
+    let db = connect().await.collection::<Domain>(DOMAINS_COLLECTION);
+    let search_name;
+
+    if auth.permission.can_mod() {
+        search_name = doc! { "name": name.clone() }
+    } else if auth.permission.can_own() {
+        search_name = doc! { "name": name.clone(), "owner": auth._id }
+    } else {
+        return Response::PERMISSIONS_TOO_LOW().json();
+    }
+    let mut dom: Option<Domain> = ok_return!(db.find_one(search_name, None).await, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
+    return if dom.is_some() {
+        let res = db.delete_one(doc! { "_id": dom.unwrap()._id }, None).await;
+        match res {
+            Ok(r) if r.deleted_count > 0 => Response::new(true, &format!("Deleted redirect named '{}'", name)).json(),
+            Ok(_) => Response::NOTHING_DELETED().json(),
+            Err(_) => Response::COULD_NOT_DELETE_REDIRECT().json()
+        }
+    } else {
+        Response::COULD_NOT_FIND_REDIRECT().json()
+    }
 }
 
 #[rocket::async_trait]
@@ -196,7 +217,10 @@ impl Response {
     const REDIRECT_DOESNT_EXIST: fn() -> Response = || Response::new(false, "Redirect doesn't exists.");
     const COULD_NOT_CREATE_REDIRECT: fn() -> Response = || Response::new(false, "Could not create redirect.");
     const COULD_NOT_EDIT_REDIRECT: fn() -> Response = || Response::new(false, "Could not edit redirect.");
+    const COULD_NOT_DELETE_REDIRECT: fn() -> Response = || Response::new(false, "Could not delete redirect.");
+    const COULD_NOT_FIND_REDIRECT: fn() -> Response = || Response::new(false, "Could not find redirect.");
     const NOTHING_CHANGED: fn() -> Response = || Response::new(false, "Nothing changed.");
+    const NOTHING_DELETED: fn() -> Response = || Response::new(false, "Nothing deleted.");
 }
 
 /////////////
