@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 use bcrypt::verify;
-use mongodb::bson::doc;
+use mongodb::bson::{doc, Document};
 use mongodb::Cursor;
 use rocket::{Build, Request, request, Rocket};
 use rocket::futures::TryStreamExt;
@@ -27,7 +27,7 @@ pub(crate) fn mount_v1(rocket: Rocket<Build>) -> Rocket<Build> {
             create_redirect,
             edit_redirect,
             remove_redirect,
-            random_redirect,
+            // TODO: random_redirect,
             i_create_post,
             i_edit_put,
             i_delete_delete,
@@ -41,6 +41,10 @@ pub(crate) fn mount_v1(rocket: Rocket<Build>) -> Rocket<Build> {
     // )
     rocket
 }
+
+////////////
+// DOMAINS
+////////////
 
 #[get("/")]
 async fn check_domains(auth: Auth) -> Json<Response> {
@@ -106,15 +110,8 @@ async fn create_redirect(name: Option<String>, domain: Option<String>, auth: Aut
 async fn edit_redirect(name: Option<String>, newname: Option<String>, domain: Option<String>, auth: Auth) -> Json<Response> {
     let name = some_return!(name, Response::USER_DID_NOT_PROVIDE_PARAM("name").json());
     let db = connect().await.collection::<Domain>(DOMAINS_COLLECTION);
-    let search_name;
+    let search_name= get_search(auth)?;
 
-    if auth.permission.can_mod() {
-        search_name = doc! { "name": name.clone() }
-    } else if auth.permission.can_own() {
-        search_name = doc! { "name": name.clone(), "owner": auth._id }
-    } else {
-        return Response::PERMISSIONS_TOO_LOW().json();
-    }
     let mut dom: Option<Domain> = ok_return!(db.find_one(search_name, None).await, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
     let dom = match dom {
         None => return Response::REDIRECT_DOESNT_EXIST().json(),
@@ -150,15 +147,8 @@ async fn edit_redirect(name: Option<String>, newname: Option<String>, domain: Op
 async fn remove_redirect(name: Option<String>, auth: Auth) -> Json<Response> {
     let name = some_return!(name, Response::USER_DID_NOT_PROVIDE_PARAM("name").json());
     let db = connect().await.collection::<Domain>(DOMAINS_COLLECTION);
-    let search_name;
+    let search_name= get_search(auth)?;
 
-    if auth.permission.can_mod() {
-        search_name = doc! { "name": name.clone() }
-    } else if auth.permission.can_own() {
-        search_name = doc! { "name": name.clone(), "owner": auth._id }
-    } else {
-        return Response::PERMISSIONS_TOO_LOW().json();
-    }
     let mut dom: Option<Domain> = ok_return!(db.find_one(search_name, None).await, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
     return if dom.is_some() {
         let res = db.delete_one(doc! { "_id": dom.unwrap()._id }, None).await;
@@ -169,7 +159,7 @@ async fn remove_redirect(name: Option<String>, auth: Auth) -> Json<Response> {
         }
     } else {
         Response::COULD_NOT_FIND_REDIRECT().json()
-    }
+    };
 }
 
 #[rocket::async_trait]
@@ -192,9 +182,9 @@ impl<'a> FromRequest<'a> for Auth {
     }
 }
 
-/////////////
-// Responses
-/////////////
+//////////////
+// RESPONSES
+//////////////
 
 impl Response {
     fn new(success: bool, response: &str) -> Self {
@@ -271,4 +261,18 @@ fn i_random_post() -> Json<Response> {
         success: false,
         response: Value::String("Use post".to_string()),
     })
+}
+
+//////////
+// OTHER
+//////////
+
+fn get_search(auth: Auth) -> Result<Document, Json<Response>> {
+    if auth.permission.can_mod() {
+        Ok(doc! { "name": name.clone() })
+    } else if auth.permission.can_own() {
+        Ok(doc! { "name": name.clone(), "owner": auth._id })
+    } else {
+        Err(Response::PERMISSIONS_TOO_LOW().json())
+    }
 }
