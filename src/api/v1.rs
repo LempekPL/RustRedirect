@@ -1,7 +1,6 @@
 use std::fmt::Debug;
 use bcrypt::verify;
 use mongodb::bson::{doc, Document};
-use mongodb::Cursor;
 use rocket::{Build, Request, request, Rocket};
 use rocket::futures::TryStreamExt;
 use rocket::http::Status;
@@ -110,9 +109,12 @@ async fn create_redirect(name: Option<String>, domain: Option<String>, auth: Aut
 async fn edit_redirect(name: Option<String>, newname: Option<String>, domain: Option<String>, auth: Auth) -> Json<Response> {
     let name = some_return!(name, Response::USER_DID_NOT_PROVIDE_PARAM("name").json());
     let db = connect().await.collection::<Domain>(DOMAINS_COLLECTION);
-    let search_name= get_search(auth)?;
+    let search_name = match get_search(auth, &name) {
+        Ok(o) => o,
+        Err(e) => return e
+    };
 
-    let mut dom: Option<Domain> = ok_return!(db.find_one(search_name, None).await, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
+    let dom: Option<Domain> = ok_return!(db.find_one(search_name, None).await, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
     let dom = match dom {
         None => return Response::REDIRECT_DOESNT_EXIST().json(),
         Some(d) => d
@@ -147,9 +149,12 @@ async fn edit_redirect(name: Option<String>, newname: Option<String>, domain: Op
 async fn remove_redirect(name: Option<String>, auth: Auth) -> Json<Response> {
     let name = some_return!(name, Response::USER_DID_NOT_PROVIDE_PARAM("name").json());
     let db = connect().await.collection::<Domain>(DOMAINS_COLLECTION);
-    let search_name= get_search(auth)?;
+    let search_name = match get_search(auth, &name) {
+        Ok(o) => o,
+        Err(e) => return e
+    };
 
-    let mut dom: Option<Domain> = ok_return!(db.find_one(search_name, None).await, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
+    let dom: Option<Domain> = ok_return!(db.find_one(search_name, None).await, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
     return if dom.is_some() {
         let res = db.delete_one(doc! { "_id": dom.unwrap()._id }, None).await;
         match res {
@@ -267,7 +272,7 @@ fn i_random_post() -> Json<Response> {
 // OTHER
 //////////
 
-fn get_search(auth: Auth) -> Result<Document, Json<Response>> {
+fn get_search(auth: Auth, name: &str) -> Result<Document, Json<Response>> {
     if auth.permission.can_mod() {
         Ok(doc! { "name": name.clone() })
     } else if auth.permission.can_own() {
