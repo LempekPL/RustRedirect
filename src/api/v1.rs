@@ -49,18 +49,16 @@ pub(crate) fn mount_v1(rocket: Rocket<Build>) -> Rocket<Build> {
 
 #[get("/")]
 async fn check_domains(auth: Auth) -> Json<Response> {
-    let conn = connect().await;
-    let col = conn.collection::<Domain>(DOMAINS_COLLECTION);
-    // check if user has enough permissions to list all/own redirects
-    let cursor;
+    let document;
     if auth.permission.can_list() {
-        cursor = col.find(None, None).await;
+        document = None;
     } else if auth.permission.can_own() {
-        cursor = col.find(doc! { "owner": auth._id }, None).await;
+        document = Some(doc! { "owner": auth._id });
     } else {
         return Response::PERMISSIONS_TOO_LOW().json();
     }
-    let cursor = ok_return!(cursor, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
+    let conn = connect().await.collection::<Domain>(DOMAINS_COLLECTION);
+    let cursor = ok_return!(conn.find(document, None).await, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
     let collected: Vec<Domain> = ok_return!(cursor.try_collect().await, Response::DATABASE_WHILST_TRYING_TO_COLLECT().json());
     let collected = ok_return!(serde_json::to_value(collected), Response::SERVER_WHILST_TRYING_TO_FORMAT().json());
     Response {
@@ -110,12 +108,12 @@ async fn create_redirect(name: Option<String>, domain: Option<String>, auth: Aut
 #[put("/edit?<name>&<newname>&<domain>")]
 async fn edit_redirect(name: Option<String>, newname: Option<String>, domain: Option<String>, auth: Auth) -> Json<Response> {
     let name = some_return!(name, Response::USER_DID_NOT_PROVIDE_PARAM("name").json());
-    let db = connect().await.collection::<Domain>(DOMAINS_COLLECTION);
     let search_name = match get_search(auth, &name) {
         Ok(o) => o,
         Err(e) => return e
     };
 
+    let db = connect().await.collection::<Domain>(DOMAINS_COLLECTION);
     let dom: Option<Domain> = ok_return!(db.find_one(search_name, None).await, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
     let dom = match dom {
         None => return Response::REDIRECT_DOESNT_EXIST().json(),
@@ -150,12 +148,12 @@ async fn edit_redirect(name: Option<String>, newname: Option<String>, domain: Op
 #[delete("/delete?<name>")]
 async fn remove_redirect(name: Option<String>, auth: Auth) -> Json<Response> {
     let name = some_return!(name, Response::USER_DID_NOT_PROVIDE_PARAM("name").json());
-    let db = connect().await.collection::<Domain>(DOMAINS_COLLECTION);
     let search_name = match get_search(auth, &name) {
         Ok(o) => o,
         Err(e) => return e
     };
 
+    let db = connect().await.collection::<Domain>(DOMAINS_COLLECTION);
     let dom: Option<Domain> = ok_return!(db.find_one(search_name, None).await, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
     return if dom.is_some() {
         let res = db.delete_one(doc! { "_id": dom.unwrap()._id }, None).await;
@@ -175,17 +173,16 @@ async fn remove_redirect(name: Option<String>, auth: Auth) -> Json<Response> {
 
 #[get("/")]
 async fn list_auth(auth: Auth) -> Json<Response> {
-    let conn = connect().await;
-    let col = conn.collection::<Auth>(AUTH_COLLECTION);
-    let cursor;
+    let document;
     if auth.permission.can_admin() {
-        cursor = col.find(None, None).await;
+        document = None
     } else if auth.permission.can_manage() {
-        cursor = col.find(doc! { "permission": {"$ne": [1, 0, 0, 0, 0, 0]}}, None).await;
+        document = Some(doc! { "permission": {"$ne": [1, 0, 0, 0, 0, 0]}})
     } else {
         return Response::PERMISSIONS_TOO_LOW().json();
     }
-    let cursor = ok_return!(cursor, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
+    let conn = connect().await.collection::<Auth>(AUTH_COLLECTION);
+    let cursor = ok_return!(conn.find(document, None).await, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
     let collected: Vec<Auth> = ok_return!(cursor.try_collect().await, Response::DATABASE_WHILST_TRYING_TO_COLLECT().json());
     let collected = ok_return!(serde_json::to_value(collected), Response::SERVER_WHILST_TRYING_TO_FORMAT().json());
     Response {
