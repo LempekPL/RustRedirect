@@ -175,20 +175,23 @@ async fn remove_redirect(name: Option<String>, auth: Auth) -> Json<Response> {
 
 #[get("/")]
 async fn list_auth(auth: Auth) -> Json<Response> {
+    let conn = connect().await;
+    let col = conn.collection::<Auth>(AUTH_COLLECTION);
+    let cursor;
     if auth.permission.can_admin() {
-        let conn = connect().await;
-        let col = conn.collection::<Auth>(AUTH_COLLECTION);
-        let cursor = col.find(None, None).await;
-        let cursor = ok_return!(cursor, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
-        let collected: Vec<Auth> = ok_return!(cursor.try_collect().await, Response::DATABASE_WHILST_TRYING_TO_COLLECT().json());
-        let collected = ok_return!(serde_json::to_value(collected), Response::SERVER_WHILST_TRYING_TO_FORMAT().json());
-        Response {
-            success: true,
-            response: collected,
-        }.json()
+        cursor = col.find(None, None).await;
+    } else if auth.permission.can_manage() {
+        cursor = col.find(doc! { "permission": {"$ne": [1, 0, 0, 0, 0, 0]}}, None).await;
     } else {
-        Response::PERMISSIONS_TOO_LOW().json()
+        return Response::PERMISSIONS_TOO_LOW().json();
     }
+    let cursor = ok_return!(cursor, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
+    let collected: Vec<Auth> = ok_return!(cursor.try_collect().await, Response::DATABASE_WHILST_TRYING_TO_COLLECT().json());
+    let collected = ok_return!(serde_json::to_value(collected), Response::SERVER_WHILST_TRYING_TO_FORMAT().json());
+    Response {
+        success: true,
+        response: collected,
+    }.json()
 }
 
 //////////

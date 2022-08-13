@@ -119,7 +119,7 @@ pub(crate) async fn manage_database() {
                 _id: Default::default(),
                 name: "admin".to_string(),
                 token: h,
-                permission: Permission(1, 0, 0, 0, 0),
+                permission: Permission(1, 0, 0, 0, 0, 0),
             }, None).await.expect("Could not create default user");
             println!("No auth found, created new auth");
         }
@@ -128,37 +128,39 @@ pub(crate) async fn manage_database() {
 
 // Permission(0, 0, 0, 0, 0)
 // 0 - full admin
-// 1 - edit(only name and password) own auth and edit/delete all redirects
-// 2 - list all redirects
-// 3 - create/edit/delete/list own redirects
-// 4 - create random named redirects
+// 1 - add/remove/edit auths lower than this and list all auths except admin
+// 2 - edit/delete all redirects
+// 3 - list all redirects
+// 4 - create/edit/delete/list own redirects
+// 5 - create random named redirects
 
 #[derive(Deserialize, Serialize, Debug)]
-pub(crate) struct Permission(u8, u8, u8, u8, u8);
+pub(crate) struct Permission(u8, u8, u8, u8, u8, u8);
 
 impl Permission {
-    pub(crate) fn to_u8(self) -> u8 {
-        self.0 * 16 + self.1 * 8 + self.2 * 4 + self.3 * 2 + self.4
-    }
-
     // can do anything they want
     pub(crate) fn can_admin(&self) -> bool {
         self.0 == 1
     }
 
-    // can edit self auth (only name and password)
-    pub(crate) fn can_mod(&self) -> bool {
+    // can add/remove/edit auths lower than admin and list all auths except admin
+    pub(crate) fn can_manage(&self) -> bool {
         self.1 == 1 || self.can_admin()
     }
 
-    // can edit/delete other redirects
-    pub(crate) fn can_list(&self) -> bool {
+    // can edit/delete all redirects
+    pub(crate) fn can_mod(&self) -> bool {
         self.2 == 1 || self.can_admin()
+    }
+
+    // can list all redirects
+    pub(crate) fn can_list(&self) -> bool {
+        self.3 == 1 || self.can_admin()
     }
 
     // can create/edit/delete/list own redirects
     pub(crate) fn can_own(&self) -> bool {
-        self.3 == 1 || self.can_admin()
+        self.4 == 1 || self.can_admin()
     }
 
     // can create random named redirects
@@ -166,23 +168,7 @@ impl Permission {
         self.4 == 1 || self.can_admin()
     }
 
-    pub(crate) fn from_u8(mut num: u8) -> Permission {
-        let mut arr: [u8; 5] = [0; 5];
-        for n in (0..5).rev() {
-            let b = 2_u8.pow(n as u32);
-            (arr[4 - n], num) = {
-                let b = num % b;
-                if b != num {
-                    (1, b)
-                } else {
-                    (0, b)
-                }
-            }
-        }
-        Permission(arr[0], arr[1], arr[2], arr[3], arr[4])
-    }
-
-    pub(crate) fn from_arr(nums: [u8; 5]) -> Permission {
-        Permission(nums[0], nums[1], nums[2], nums[3], nums[4])
+    pub(crate) fn from_arr(nums: [u8; 6]) -> Permission {
+        Permission(nums[0], nums[1], nums[2], nums[3], nums[4], nums[5])
     }
 }
