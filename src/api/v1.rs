@@ -33,11 +33,13 @@ pub(crate) fn mount_v1(rocket: Rocket<Build>) -> Rocket<Build> {
             i_random_post,
             ],
     );
-    // .mount("/api/v1/auth",
-    //        routes![
-    //     TODO: add_auth, edit_auth, delete_auth,
-    //  ],
-    // )
+    let rocket = rocket.mount(
+        "/api/v1/auth",
+        routes![
+               list_auth,
+        // TODO: add_auth, edit_auth, delete_auth
+     ],
+    );
     rocket
 }
 
@@ -166,6 +168,32 @@ async fn remove_redirect(name: Option<String>, auth: Auth) -> Json<Response> {
         Response::COULD_NOT_FIND_REDIRECT().json()
     };
 }
+
+////////////
+// AUTHS
+////////////
+
+#[get("/")]
+async fn list_auth(auth: Auth) -> Json<Response> {
+    if auth.permission.can_admin() {
+        let conn = connect().await;
+        let col = conn.collection::<Auth>(AUTH_COLLECTION);
+        let cursor = col.find(None, None).await;
+        let cursor = ok_return!(cursor, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
+        let collected: Vec<Auth> = ok_return!(cursor.try_collect().await, Response::DATABASE_WHILST_TRYING_TO_COLLECT().json());
+        let collected = ok_return!(serde_json::to_value(collected), Response::SERVER_WHILST_TRYING_TO_FORMAT().json());
+        Response {
+            success: true,
+            response: collected,
+        }.json()
+    } else {
+        Response::PERMISSIONS_TOO_LOW().json()
+    }
+}
+
+//////////
+// AUTH
+//////////
 
 #[rocket::async_trait]
 impl<'a> FromRequest<'a> for Auth {
