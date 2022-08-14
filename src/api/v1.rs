@@ -177,7 +177,7 @@ async fn list_auth(auth: Auth) -> Json<Response> {
     if auth.permission.can_admin() {
         document = None
     } else if auth.permission.can_manage() {
-        document = Some(doc! { "permission": {"$ne": [1, 0, 0, 0, 0, 0]}})
+        document = Some(doc! { "permission.0": {"$ne": 1}})
     } else {
         return Response::PERMISSIONS_TOO_LOW().json();
     }
