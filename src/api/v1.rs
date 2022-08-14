@@ -38,8 +38,8 @@ pub(crate) fn mount_v1(rocket: Rocket<Build>) -> Rocket<Build> {
             list_auth,
             create_auth,
             edit_auth,
-        // TODO:   delete_auth
-     ],
+            delete_auth
+        ],
     );
     rocket
 }
@@ -292,6 +292,29 @@ async fn edit_auth(name: Option<String>, newname: Option<String>, password: Opti
         Response::PERMISSIONS_TOO_LOW().json()
     };
 }
+
+#[delete("/delete?<name>")]
+async fn delete_auth(name: Option<String>, auth: Auth) -> Json<Response> {
+    let name = some_return!(name, Response::USER_DID_NOT_PROVIDE_PARAM("name").json());
+    let db = connect().await.collection::<Auth>(AUTH_COLLECTION);
+    let del_auth = ok_return!(db.find_one(doc! { "name": name.clone() }, None).await, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
+    match del_auth {
+        Some(del_auth) => {
+            if auth.permission.can_admin() || (auth.permission.can_manage() && !del_auth.permission.can_manage()) {
+                let res = db.delete_one(doc! { "_id": del_auth._id }, None).await;
+                match res {
+                    Ok(r) if r.deleted_count > 0 => Response::new(true, &format!("Deleted auth named '{}'", name)).json(),
+                    Ok(_) => Response::NOTHING_DELETED().json(),
+                    Err(_) => Response::COULD_NOT("delete", "auth").json()
+                }
+            } else {
+                return Response::PERMISSIONS_TOO_LOW().json()
+            }
+        },
+        None => Response::COULD_NOT("find", "redirect").json()
+    }
+}
+
 
 //////////
 // AUTH
