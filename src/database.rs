@@ -114,14 +114,21 @@ pub(crate) async fn manage_database() {
     let a_col = db.collection::<Auth>(AUTH_COLLECTION);
     if let Ok(count) = a_col.count_documents(None, None).await {
         if count == 0 {
-            let h = bcrypt::hash("pass", bcrypt::DEFAULT_COST).expect("Could not hash");
-            a_col.insert_one(Auth {
+            let h = match bcrypt::hash("pass", bcrypt::DEFAULT_COST) {
+                Ok(k) => k,
+                Err(e) => panic!("Could not hash. {:?}", e)
+            };
+            let res = a_col.insert_one(Auth {
                 _id: Default::default(),
                 name: "admin".to_string(),
                 token: h,
                 permission: Permission(1, 0, 0, 0, 0, 0),
-            }, None).await.expect("Could not create default user");
-            println!("No auth found, created new auth");
+            }, None).await;
+            match res {
+                Ok(_) => println!("No auth found, created new auth"),
+                Err(e) => panic!("Could not create default user. {:?}", e)
+            }
+
         }
     }
 }
