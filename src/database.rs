@@ -1,13 +1,14 @@
 use std::fmt::{Display, Formatter};
 use std::process;
 use mongodb::{Client, Database};
+use mongodb::bson::Bson;
 use mongodb::bson::oid::ObjectId;
 use mongodb::error::ErrorKind;
 use mongodb::options::ClientOptions;
 use rocket::Config;
 use rocket::tokio::join;
 use serde::{Serialize, Deserialize};
-use crate::{AUTH_COLLECTION, DATABASE_NAME, DOMAINS_COLLECTION};
+use crate::{add_and, AUTH_COLLECTION, DATABASE_NAME, DOMAINS_COLLECTION};
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub(crate) struct Domain {
@@ -21,7 +22,7 @@ pub(crate) struct Domain {
 pub(crate) struct Auth {
     pub(crate) _id: ObjectId,
     pub(crate) name: String,
-    pub(crate) token: String,
+    pub(crate) password: String,
     pub(crate) permission: Permission,
 }
 
@@ -122,7 +123,7 @@ pub(crate) async fn manage_database() {
             let res = a_col.insert_one(Auth {
                 _id: Default::default(),
                 name: "admin".to_string(),
-                token: h,
+                password: h,
                 permission: Permission(1, 0, 0, 0, 0, 0),
             }, None).await;
             match res {
@@ -180,6 +181,14 @@ impl Permission {
         self.0 == 0 && self.1 == 0 && self.2 == 0 && self.3 == 0 && self.4 == 0 && self.5 == 0
     }
 
+    pub(crate) fn to_arr(self) -> [u8; 6] {
+        [self.0, self.1, self.2, self.3, self.4, self.5]
+    }
+
+    pub(crate) fn to_vec(self) -> Vec<u8> {
+        vec![self.0, self.1, self.2, self.3, self.4, self.5]
+    }
+
     pub(crate) fn from_arr(nums: [u8; 6]) -> Permission {
         Permission(nums[0], nums[1], nums[2], nums[3], nums[4], nums[5])
     }
@@ -210,17 +219,20 @@ impl Permission {
     }
 }
 
-impl Default for Permission {
-    fn default() -> Self {
-        Permission(0, 0, 0, 0, 0, 0)
+impl From<Permission> for Bson {
+    fn from(p: Permission) -> Self {
+        let p = p
+            .to_vec()
+            .iter()
+            .map(|p| Bson::Int32(*p as i32))
+            .collect::<Vec<Bson>>();
+        Bson::Array(p)
     }
 }
 
-macro_rules! add_and {
-    ( $s:expr ) => {
-        if !$s.is_empty() {
-           $s = $s + " and "
-        }
+impl Default for Permission {
+    fn default() -> Self {
+        Permission(0, 0, 0, 0, 0, 0)
     }
 }
 
@@ -231,23 +243,23 @@ impl Display for Permission {
         } else {
             let mut str: String = "".to_string();
             if self.can_manage() {
-                str = str + "can manage (add/remove/edit auths lower than themself and list all auths except admin)";
+                str += "can manage (add/remove/edit auths lower than themself and list all auths except admin)";
             }
             if self.can_mod() {
                 add_and!(str);
-                str = str + "can mod (edit/delete all redirects)";
+                str += "can mod (edit/delete all redirects)";
             }
             if self.can_list() {
                 add_and!(str);
-                str = str + "can list (list all redirects)";
+                str += "can list (list all redirects)";
             }
             if self.can_own() {
                 add_and!(str);
-                str = str + "can own (create/edit/delete/list own redirects)";
+                str += "can own (create/edit/delete/list own redirects)";
             }
             if self.can_random() {
                 add_and!(str);
-                str = str + "can random (create random named redirects)";
+                str += "can random (create random named redirects)";
             }
             if self.can_nothing() {
                 str = "can nothing (no permissions to do anything)".to_string();

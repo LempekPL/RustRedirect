@@ -77,5 +77,14 @@ macro_rules! ok_return {
     }
 }
 
+macro_rules! add_and {
+    ( $s:expr ) => {
+        if !$s.is_empty() {
+           $s = $s + " and "
+        }
+    }
+}
+
 pub(crate) use some_return;
 pub(crate) use ok_return;
+pub(crate) use add_and;

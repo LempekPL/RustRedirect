@@ -8,7 +8,7 @@ use rocket::request::FromRequest;
 use serde::Serialize;
 use rocket::serde::json::Json;
 use serde_json::Value;
-use crate::{AUTH_COLLECTION, DOMAINS_COLLECTION, Domain, connect, some_return, ok_return};
+use crate::{AUTH_COLLECTION, DOMAINS_COLLECTION, Domain, connect, some_return, ok_return, add_and};
 use crate::database::{Auth, Permission};
 
 #[derive(Serialize)]
@@ -35,9 +35,10 @@ pub(crate) fn mount_v1(rocket: Rocket<Build>) -> Rocket<Build> {
     let rocket = rocket.mount(
         "/api/v1/auth",
         routes![
-               list_auth,
-                add_auth,
-        // TODO:  edit_auth, delete_auth
+            list_auth,
+            add_auth,
+            edit_auth,
+        // TODO:   delete_auth
      ],
     );
     rocket
@@ -74,7 +75,7 @@ fn random_redirect(domain: Option<String>, auth: Auth) -> Json<Response> {
     // }
     Json(Response {
         success: true,
-        response: Value::String(format!("Created redirect to '' named ''. Made by using token named: ")),
+        response: Value::String(format!("Created redirect to '' named ''. Made by using auth named: ")),
     })
 }
 
@@ -87,7 +88,7 @@ async fn create_redirect(name: Option<String>, domain: Option<String>, auth: Aut
         let db = connect().await.collection::<Domain>(DOMAINS_COLLECTION);
         let dom: Option<Domain> = ok_return!(db.find_one(doc! { "name" : name.clone() }, None).await, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
         if dom.is_some() {
-            return Response::REDIRECT_ALREADY_EXIST().json();
+            return Response::EXIST("Redirect", "already").json();
         }
         let res = db.insert_one(
             Domain {
@@ -116,7 +117,7 @@ async fn edit_redirect(name: Option<String>, newname: Option<String>, domain: Op
     let db = connect().await.collection::<Domain>(DOMAINS_COLLECTION);
     let dom: Option<Domain> = ok_return!(db.find_one(search_name, None).await, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
     let dom = match dom {
-        None => return Response::REDIRECT_DOESNT_EXIST().json(),
+        None => return Response::EXIST("Redirect", "doesn't").json(),
         Some(d) => d
     };
     let res = db
@@ -127,18 +128,18 @@ async fn edit_redirect(name: Option<String>, newname: Option<String>, domain: Op
         .await;
     match res {
         Ok(m) if m.modified_count > 0 => {
-            match (newname.clone(), domain.clone()) {
-                (n, d) if n.is_some() && d.is_some() => {
-                    Response::new(true, &format!("Edited redirect. Name '{}' -> '{}' and domain '{}' -> '{}'", name, newname.unwrap(), dom.domain, domain.unwrap())).json()
-                }
-                (n, d) if n.is_none() && d.is_some() => {
-                    Response::new(true, &format!("Edited redirect. Domain '{}' -> '{}'", dom.domain, domain.unwrap())).json()
-                }
-                (n, d) if n.is_some() && d.is_none() => {
-                    Response::new(true, &format!("Edited redirect. Name '{}' -> '{}'", name, newname.unwrap())).json()
-                }
-                _ => Response::NOTHING_CHANGED().json()
+            if newname.is_none() && domain.is_none() {
+                return Response::NOTHING_CHANGED().json();
             }
+            let mut str = "".to_string();
+            if let Some(newname) = newname {
+                str += &format!("name '{}' -> '{}'", name, newname);
+            }
+            if let Some(domain) = domain {
+                add_and!(str);
+                str += &format!("permission '{}' -> '{}'", dom.domain, domain);
+            }
+            return Response::new(true, &format!("Edited redirect, {}", str)).json();
         }
         Ok(_) => Response::NOTHING_CHANGED().json(),
         Err(_) => Response::COULD_NOT("edit", "redirect").json()
@@ -199,24 +200,79 @@ async fn add_auth(name: Option<String>, password: Option<String>, permission: Op
         None => Permission::default(),
         Some(p) => Permission::from_u8(p)
     };
-    dbg!(permission);
     return if auth.permission.can_admin() || (auth.permission.can_manage() && !permission.can_manage()) {
         let db = connect().await.collection::<Auth>(AUTH_COLLECTION);
         let auth: Option<Auth> = ok_return!(db.find_one(doc! { "name" : name.clone() }, None).await, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
         if auth.is_some() {
-            return Response::AUTH_ALREADY_EXIST().json();
+            return Response::EXIST("Auth", "already").json();
         }
         let hashed = ok_return!(bcrypt::hash(password, bcrypt::DEFAULT_COST), Response::COULD_NOT("encrypt", "password").json());
         let res = db.insert_one(
             Auth {
                 _id: Default::default(),
                 name: name.clone(),
-                token: hashed,
+                password: hashed,
                 permission,
             }, None).await;
         match res {
             Ok(_) => Response::new(true, &format!("Created auth named '{}' with permission: {}.", name, permission)).json(),
             Err(_) => Response::COULD_NOT("create", "auth").json()
+        }
+    } else {
+        Response::PERMISSIONS_TOO_LOW().json()
+    };
+}
+
+#[put("/edit?<name>&<newname>&<password>&<permission>")]
+async fn edit_auth(name: Option<String>, newname: Option<String>, password: Option<String>, permission: Option<u8>, auth: Auth) -> Json<Response> {
+    let name = some_return!(name, Response::USER_DID_NOT_PROVIDE_PARAM("name").json());
+    let permission = match permission {
+        None => None,
+        Some(p) => Some(Permission::from_u8(p))
+    };
+
+    return if auth.permission.can_admin() || (auth.permission.can_manage() && (permission.is_none() || !permission.clone().unwrap().can_manage())) {
+        let db = connect().await.collection::<Auth>(AUTH_COLLECTION);
+        let old_auth: Option<Auth> = ok_return!(db.find_one(doc! { "name" : name.clone() }, None).await, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
+        let old_auth: Auth = some_return!(old_auth, Response::EXIST("Auth", "doesn't").json());
+        let hashed;
+        match password.clone() {
+            None => hashed = None,
+            Some(p) => hashed = Some(ok_return!(bcrypt::hash(p, bcrypt::DEFAULT_COST), Response::COULD_NOT("encrypt", "password").json()))
+        }
+        let res = db
+            .update_one(
+                doc! { "_id" : old_auth._id },
+                doc! {
+                    "$set": {
+                        "name": newname.clone().unwrap_or(old_auth.name.clone()),
+                        "password": hashed.clone().unwrap_or(old_auth.password.clone()),
+                        "permission": permission.unwrap_or(old_auth.permission)
+                    }
+                },
+                None)
+            .await;
+        match res {
+            Ok(m) if m.modified_count > 0 => {
+                if newname.is_none() && password.is_none() && permission.is_none() {
+                    return Response::NOTHING_CHANGED().json();
+                }
+                let mut str = "".to_string();
+                if let Some(newname) = newname {
+                    str += &format!("name '{}' -> '{}'", old_auth.name, newname);
+                }
+                if password.is_some() {
+                    add_and!(str);
+                    str += &format!("password changed");
+                }
+                if let Some(permission) = permission {
+                    add_and!(str);
+                    str += &format!("permission '{}' -> '{}'", old_auth.permission, permission);
+                }
+                return Response::new(true, &format!("Edited auth, {}", str)).json();
+            }
+            Ok(_) => Response::NOTHING_CHANGED().json(),
+            Err(_) => Response::COULD_NOT("edit", "redirect").json()
         }
     } else {
         Response::PERMISSIONS_TOO_LOW().json()
@@ -233,12 +289,12 @@ impl<'a> FromRequest<'a> for Auth {
 
     async fn from_request(request: &'a Request<'_>) -> request::Outcome<Self, Self::Error> {
         let name: &str = some_return!(request.headers().get_one("name"), Outcome::Failure((Status::BadRequest, AuthError::MissingName)));
-        let token: &str = some_return!(request.headers().get_one("token"), Outcome::Failure((Status::BadRequest, AuthError::MissingToken)));
+        let password: &str = some_return!(request.headers().get_one("password"), Outcome::Failure((Status::BadRequest, AuthError::MissingPassword)));
         // connect to database and select auth collection
         let col = connect().await.collection::<Auth>(AUTH_COLLECTION);
         let found: Option<Auth> = ok_return!(col.find_one(doc! {"name": name}, None).await, Outcome::Failure((Status::InternalServerError, AuthError::ServerError)));
         let auth: Auth = some_return!(found, Outcome::Failure((Status::Unauthorized, AuthError::NotFound)));
-        let ver: bool = ok_return!(verify(token, &auth.token), Outcome::Failure((Status::Unauthorized, AuthError::Unknown)));
+        let ver: bool = ok_return!(verify(password, &auth.password), Outcome::Failure((Status::Unauthorized, AuthError::Unknown)));
         return if ver {
             Outcome::Success(auth)
         } else {
@@ -268,10 +324,7 @@ impl Response {
     const SERVER_WHILST_TRYING_TO_FORMAT: fn() -> Response = || Response::new(false, "Server error whilst response formatting.");
     const USER_DID_NOT_PROVIDE_PARAM: fn(&str) -> Response = |param: &str| Response::new(false, &format!("User error, did not provide '{}' param.", param));
     const PERMISSIONS_TOO_LOW: fn() -> Response = || Response::new(false, "Could not do that. Permissions too low.");
-    const REDIRECT_ALREADY_EXIST: fn() -> Response = || Response::new(false, "Redirect with that name already exists.");
-    const REDIRECT_DOESNT_EXIST: fn() -> Response = || Response::new(false, "Redirect doesn't exists.");
-    const AUTH_ALREADY_EXIST: fn() -> Response = || Response::new(false, "Auth with that name already exists.");
-    const AUTH_DOESNT_EXIST: fn() -> Response = || Response::new(false, "Auth doesn't exists.");
+    const EXIST: fn(&str, &str) -> Response = |thing: &str, action: &str| Response::new(false, &format!("{} {} exist.", thing, action));
     const COULD_NOT: fn(&str, &str) -> Response = |action: &str, thing: &str| Response::new(false, &format!("Could not {} {}.", action, thing));
     const NOTHING_CHANGED: fn() -> Response = || Response::new(false, "Nothing changed.");
     const NOTHING_DELETED: fn() -> Response = || Response::new(false, "Nothing deleted.");
@@ -283,7 +336,7 @@ impl Response {
 
 #[derive(Debug)]
 pub(crate) enum AuthError {
-    MissingToken,
+    MissingPassword,
     MissingName,
     Invalid,
     ServerError,
