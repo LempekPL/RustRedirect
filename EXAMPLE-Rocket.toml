@@ -4,6 +4,3 @@ db_host="localhost"
 db_port=27017
 db_user="admin"
 db_password=""
-
-[release]
-secret_key = "your base64 openssl 32-bit string"
