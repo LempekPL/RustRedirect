@@ -1,4 +1,3 @@
-use std::fmt::Debug;
 use bcrypt::verify;
 use mongodb::bson::{doc, Document};
 use rocket::{Build, Request, request, Rocket};
@@ -10,7 +9,7 @@ use serde::Serialize;
 use rocket::serde::json::Json;
 use serde_json::Value;
 use crate::{AUTH_COLLECTION, DOMAINS_COLLECTION, Domain, connect, some_return, ok_return};
-use crate::database::Auth;
+use crate::database::{Auth, Permission};
 
 #[derive(Serialize)]
 struct Response {
@@ -37,7 +36,8 @@ pub(crate) fn mount_v1(rocket: Rocket<Build>) -> Rocket<Build> {
         "/api/v1/auth",
         routes![
                list_auth,
-        // TODO: add_auth, edit_auth, delete_auth
+                add_auth,
+        // TODO:  edit_auth, delete_auth
      ],
     );
     rocket
@@ -97,8 +97,8 @@ async fn create_redirect(name: Option<String>, domain: Option<String>, auth: Aut
                 owner: auth._id,
             }, None).await;
         return match res {
-            Ok(_) => Response::new(true, &format!("Created redirect to '{}' named '{}'. Using token named: {}", domain, name, auth.name)).json(),
-            Err(_) => Response::COULD_NOT_CREATE_REDIRECT().json()
+            Ok(_) => Response::new(true, &format!("Created redirect to '{}' named '{}'.", domain, name)).json(),
+            Err(_) => Response::COULD_NOT("create", "redirect").json()
         };
     } else {
         Response::PERMISSIONS_TOO_LOW().json()
@@ -141,7 +141,7 @@ async fn edit_redirect(name: Option<String>, newname: Option<String>, domain: Op
             }
         }
         Ok(_) => Response::NOTHING_CHANGED().json(),
-        Err(_) => Response::COULD_NOT_EDIT_REDIRECT().json()
+        Err(_) => Response::COULD_NOT("edit", "redirect").json()
     }
 }
 
@@ -160,10 +160,10 @@ async fn remove_redirect(name: Option<String>, auth: Auth) -> Json<Response> {
         match res {
             Ok(r) if r.deleted_count > 0 => Response::new(true, &format!("Deleted redirect named '{}'", name)).json(),
             Ok(_) => Response::NOTHING_DELETED().json(),
-            Err(_) => Response::COULD_NOT_DELETE_REDIRECT().json()
+            Err(_) => Response::COULD_NOT("delete", "redirect").json()
         }
     } else {
-        Response::COULD_NOT_FIND_REDIRECT().json()
+        Response::COULD_NOT("find", "redirect").json()
     };
 }
 
@@ -189,6 +189,38 @@ async fn list_auth(auth: Auth) -> Json<Response> {
         success: true,
         response: collected,
     }.json()
+}
+
+#[post("/add?<name>&<password>&<permission>")]
+async fn add_auth(name: Option<String>, password: Option<String>, permission: Option<u8>, auth: Auth) -> Json<Response> {
+    let name = some_return!(name, Response::USER_DID_NOT_PROVIDE_PARAM("name").json());
+    let password = some_return!(password, Response::USER_DID_NOT_PROVIDE_PARAM("password").json());
+    let permission = match permission {
+        None => Permission::default(),
+        Some(p) => Permission::from_u8(p)
+    };
+    dbg!(permission);
+    return if auth.permission.can_admin() || (auth.permission.can_manage() && !permission.can_manage()) {
+        let db = connect().await.collection::<Auth>(AUTH_COLLECTION);
+        let auth: Option<Auth> = ok_return!(db.find_one(doc! { "name" : name.clone() }, None).await, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
+        if auth.is_some() {
+            return Response::AUTH_ALREADY_EXIST().json();
+        }
+        let hashed = ok_return!(bcrypt::hash(password, bcrypt::DEFAULT_COST), Response::COULD_NOT("encrypt", "password").json());
+        let res = db.insert_one(
+            Auth {
+                _id: Default::default(),
+                name: name.clone(),
+                token: hashed,
+                permission,
+            }, None).await;
+        match res {
+            Ok(_) => Response::new(true, &format!("Created auth named '{}' with permission: {}.", name, permission)).json(),
+            Err(_) => Response::COULD_NOT("create", "auth").json()
+        }
+    } else {
+        Response::PERMISSIONS_TOO_LOW().json()
+    };
 }
 
 //////////
@@ -238,10 +270,9 @@ impl Response {
     const PERMISSIONS_TOO_LOW: fn() -> Response = || Response::new(false, "Could not do that. Permissions too low.");
     const REDIRECT_ALREADY_EXIST: fn() -> Response = || Response::new(false, "Redirect with that name already exists.");
     const REDIRECT_DOESNT_EXIST: fn() -> Response = || Response::new(false, "Redirect doesn't exists.");
-    const COULD_NOT_CREATE_REDIRECT: fn() -> Response = || Response::new(false, "Could not create redirect.");
-    const COULD_NOT_EDIT_REDIRECT: fn() -> Response = || Response::new(false, "Could not edit redirect.");
-    const COULD_NOT_DELETE_REDIRECT: fn() -> Response = || Response::new(false, "Could not delete redirect.");
-    const COULD_NOT_FIND_REDIRECT: fn() -> Response = || Response::new(false, "Could not find redirect.");
+    const AUTH_ALREADY_EXIST: fn() -> Response = || Response::new(false, "Auth with that name already exists.");
+    const AUTH_DOESNT_EXIST: fn() -> Response = || Response::new(false, "Auth doesn't exists.");
+    const COULD_NOT: fn(&str, &str) -> Response = |action: &str, thing: &str| Response::new(false, &format!("Could not {} {}.", action, thing));
     const NOTHING_CHANGED: fn() -> Response = || Response::new(false, "Nothing changed.");
     const NOTHING_DELETED: fn() -> Response = || Response::new(false, "Nothing deleted.");
 }

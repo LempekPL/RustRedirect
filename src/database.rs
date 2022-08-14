@@ -1,3 +1,4 @@
+use std::fmt::{Display, Formatter};
 use std::process;
 use mongodb::{Client, Database};
 use mongodb::bson::oid::ObjectId;
@@ -128,7 +129,6 @@ pub(crate) async fn manage_database() {
                 Ok(_) => println!("No auth found, created new auth"),
                 Err(e) => panic!("Could not create default user. {:?}", e)
             }
-
         }
     }
 }
@@ -141,7 +141,7 @@ pub(crate) async fn manage_database() {
 // 4 - create/edit/delete/list own redirects
 // 5 - create random named redirects
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Clone, Copy)]
 pub(crate) struct Permission(u8, u8, u8, u8, u8, u8);
 
 impl Permission {
@@ -150,7 +150,7 @@ impl Permission {
         self.0 == 1
     }
 
-    // can add/remove/edit auths lower than admin and list all auths except admin
+    // can add/remove/edit auths lower than themself and list all auths except admin
     pub(crate) fn can_manage(&self) -> bool {
         self.1 == 1 || self.can_admin()
     }
@@ -172,10 +172,87 @@ impl Permission {
 
     // can create random named redirects
     pub(crate) fn can_random(&self) -> bool {
-        self.4 == 1 || self.can_admin()
+        self.5 == 1 || self.can_admin()
+    }
+
+    // can nothing
+    pub(crate) fn can_nothing(&self) -> bool {
+        self.0 == 0 && self.1 == 0 && self.2 == 0 && self.3 == 0 && self.4 == 0 && self.5 == 0
     }
 
     pub(crate) fn from_arr(nums: [u8; 6]) -> Permission {
         Permission(nums[0], nums[1], nums[2], nums[3], nums[4], nums[5])
+    }
+
+    pub(crate) fn from_vec(nums: Vec<u8>) -> Permission {
+        Permission(
+            *nums.get(0).unwrap_or(&0),
+            *nums.get(1).unwrap_or(&0),
+            *nums.get(2).unwrap_or(&0),
+            *nums.get(3).unwrap_or(&0),
+            *nums.get(4).unwrap_or(&0),
+            *nums.get(5).unwrap_or(&0),
+        )
+    }
+
+    pub(crate) fn from_u8(num: u8) -> Permission {
+        let bin = format!("{:06b}", num).trim().to_owned();
+        dbg!(&bin);
+        let bins: Vec<u8> = bin
+            .chars()
+            .map(|x| x
+                .to_string()
+                .parse::<u8>()
+                .unwrap_or(0)
+            )
+            .collect();
+        Permission::from_vec(bins)
+    }
+}
+
+impl Default for Permission {
+    fn default() -> Self {
+        Permission(0, 0, 0, 0, 0, 0)
+    }
+}
+
+macro_rules! add_and {
+    ( $s:expr ) => {
+        if !$s.is_empty() {
+           $s = $s + " and "
+        }
+    }
+}
+
+impl Display for Permission {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if self.can_admin() {
+            write!(f, "can admin (do anything they want)")
+        } else {
+            let mut str: String = "".to_string();
+            if self.can_manage() {
+                str = str + "can manage (add/remove/edit auths lower than themself and list all auths except admin)";
+            }
+            if self.can_mod() {
+                add_and!(str);
+                str = str + "can mod (edit/delete all redirects)";
+            }
+            if self.can_list() {
+                add_and!(str);
+                str = str + "can list (list all redirects)";
+            }
+            if self.can_own() {
+                add_and!(str);
+                str = str + "can own (create/edit/delete/list own redirects)";
+            }
+            if self.can_random() {
+                add_and!(str);
+                str = str + "can random (create random named redirects)";
+            }
+            if self.can_nothing() {
+                str = "can nothing (no permissions to do anything)".to_string();
+            }
+            write!(f, "{}", str)
+        }
     }
 }
