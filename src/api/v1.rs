@@ -113,8 +113,13 @@ async fn edit_redirect(name: Option<String>, newname: Option<String>, domain: Op
         Ok(o) => o,
         Err(e) => return e
     };
-
     let db = connect().await.collection::<Domain>(DOMAINS_COLLECTION);
+    if let Some(newname) = newname.clone() {
+        let existing_domain: Option<Domain> = ok_return!(db.find_one(doc! { "name" : newname }, None).await, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
+        if existing_domain.is_some() {
+            return Response::EXIST("Domain with the new name", "already").json();
+        }
+    }
     let dom: Option<Domain> = ok_return!(db.find_one(search_name, None).await, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
     let dom = match dom {
         None => return Response::EXIST("Redirect", "doesn't").json(),
@@ -153,7 +158,6 @@ async fn remove_redirect(name: Option<String>, auth: Auth) -> Json<Response> {
         Ok(o) => o,
         Err(e) => return e
     };
-
     let db = connect().await.collection::<Domain>(DOMAINS_COLLECTION);
     let dom: Option<Domain> = ok_return!(db.find_one(search_name, None).await, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
     return if dom.is_some() {
@@ -202,9 +206,9 @@ async fn add_auth(name: Option<String>, password: Option<String>, permission: Op
     };
     return if auth.permission.can_admin() || (auth.permission.can_manage() && !permission.can_manage()) {
         let db = connect().await.collection::<Auth>(AUTH_COLLECTION);
-        let auth: Option<Auth> = ok_return!(db.find_one(doc! { "name" : name.clone() }, None).await, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
-        if auth.is_some() {
-            return Response::EXIST("Auth", "already").json();
+        let existing_auth: Option<Auth> = ok_return!(db.find_one(doc! { "name" : name.clone() }, None).await, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
+        if existing_auth.is_some() {
+            return Response::EXIST("Auth with that name", "already").json();
         }
         let hashed = ok_return!(bcrypt::hash(password, bcrypt::DEFAULT_COST), Response::COULD_NOT("encrypt", "password").json());
         let res = db.insert_one(
@@ -233,8 +237,17 @@ async fn edit_auth(name: Option<String>, newname: Option<String>, password: Opti
 
     return if auth.permission.can_admin() || (auth.permission.can_manage() && (permission.is_none() || !permission.clone().unwrap().can_manage())) {
         let db = connect().await.collection::<Auth>(AUTH_COLLECTION);
+        if let Some(newname) = newname.clone() {
+            let existing_auth: Option<Auth> = ok_return!(db.find_one(doc! { "name" : newname }, None).await, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
+            if existing_auth.is_some() {
+                return Response::EXIST("Auth with the new name", "already").json();
+            }
+        }
         let old_auth: Option<Auth> = ok_return!(db.find_one(doc! { "name" : name.clone() }, None).await, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
         let old_auth: Auth = some_return!(old_auth, Response::EXIST("Auth", "doesn't").json());
+        if !auth.permission.can_admin() && old_auth.permission.can_manage() {
+            return Response::PERMISSIONS_TOO_LOW().json();
+        }
         let hashed;
         match password.clone() {
             None => hashed = None,
