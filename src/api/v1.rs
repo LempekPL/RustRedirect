@@ -1,12 +1,23 @@
-use bcrypt::verify;
-use mongodb::bson::{doc, Document};
-use rocket::{Build, Request, request, Rocket};
-use rocket::futures::TryStreamExt;
-use rocket::http::Status;
-use rocket::outcome::Outcome;
-use rocket::request::FromRequest;
+use mongodb::{
+    Collection,
+    bson::{doc, Document}
+};
+use rand::{
+    SeedableRng,
+    distributions::{Alphanumeric, DistString}
+};
+use rocket::{
+    Build,
+    Request,
+    request,
+    Rocket,
+    futures::TryStreamExt,
+    http::Status,
+    outcome::Outcome,
+    request::FromRequest,
+    serde::json::Json
+};
 use serde::Serialize;
-use rocket::serde::json::Json;
 use serde_json::Value;
 use crate::{AUTH_COLLECTION, DOMAINS_COLLECTION, Domain, connect, some_return, ok_return, add_and};
 use crate::database::{Auth, Permission};
@@ -25,7 +36,7 @@ pub(crate) fn mount_v1(rocket: Rocket<Build>) -> Rocket<Build> {
             create_redirect,
             edit_redirect,
             remove_redirect,
-            // TODO: random_redirect,
+            random_redirect,
             i_create_post,
             i_edit_put,
             i_delete_delete,
@@ -38,7 +49,10 @@ pub(crate) fn mount_v1(rocket: Rocket<Build>) -> Rocket<Build> {
             list_auth,
             create_auth,
             edit_auth,
-            delete_auth
+            delete_auth,
+            i_create_post,
+            i_edit_put,
+            i_delete_delete,
         ],
     );
     rocket
@@ -69,14 +83,40 @@ async fn check_domains(auth: Auth) -> Json<Response> {
 }
 
 #[post("/random?<domain>")]
-fn random_redirect(domain: Option<String>, auth: Auth) -> Json<Response> {
-    // if auth.permission.can_random() {
-    //
-    // }
-    Json(Response {
-        success: true,
-        response: Value::String(format!("Created redirect to '' named ''. Made by using auth named: ")),
-    })
+async fn random_redirect(domain: Option<String>, auth: Auth) -> Json<Response> {
+    let domain = some_return!(domain, Response::USER_DID_NOT_PROVIDE_PARAM("domain").json());
+    let db = connect().await.collection::<Domain>(DOMAINS_COLLECTION);
+    if auth.permission.can_random() {
+        let name = match get_check_random(&db, Alphanumeric.sample_string(&mut rand::rngs::SmallRng::from_entropy(), 8), 3).await {
+            Ok(o) => o,
+            Err(e) => return e
+        };
+        let res = db.insert_one(
+            Domain {
+                _id: Default::default(),
+                name: name.clone(),
+                domain: domain.clone(),
+                owner: auth._id,
+            }, None).await;
+        return match res {
+            Ok(_) => Response::new(true, &format!("Created random redirect to '{}' named '{}'.", domain, name)).json(),
+            Err(_) => Response::COULD_NOT("create", "random redirect").json()
+        };
+    } else {
+        Response::PERMISSIONS_TOO_LOW().json()
+    }
+}
+
+#[async_recursion::async_recursion]
+async fn get_check_random(db: &Collection<Domain>, name: String, tries: u32) -> Result<String, Json<Response>> {
+    if tries == 0 {
+        return Err(Response::COULD_NOT("create", "random redirect").json());
+    }
+    let dom = ok_return!(db.find_one(doc! { "name": name.clone() }, None).await, Err(Response::DATABASE_WHILST_TRYING_TO_FIND().json()));
+    return match dom {
+        Some(_) => get_check_random(db, Alphanumeric.sample_string(&mut rand::rngs::SmallRng::from_entropy(), 8), tries - 1).await,
+        None => Ok(name)
+    }
 }
 
 #[post("/create?<name>&<domain>")]
@@ -331,7 +371,7 @@ impl<'a> FromRequest<'a> for Auth {
         let col = connect().await.collection::<Auth>(AUTH_COLLECTION);
         let found: Option<Auth> = ok_return!(col.find_one(doc! {"name": name}, None).await, Outcome::Failure((Status::InternalServerError, AuthError::ServerError)));
         let auth: Auth = some_return!(found, Outcome::Failure((Status::Unauthorized, AuthError::NotFound)));
-        let ver: bool = ok_return!(verify(password, &auth.password), Outcome::Failure((Status::Unauthorized, AuthError::Unknown)));
+        let ver: bool = ok_return!(bcrypt::verify(password, &auth.password), Outcome::Failure((Status::Unauthorized, AuthError::Unknown)));
         return if ver {
             Outcome::Success(auth)
         } else {

@@ -9,6 +9,7 @@ dependencies = [
  "async-recursion",
  "bcrypt",
  "mongodb",
+ "rand",
  "rocket",
  "serde",
  "serde_json",
