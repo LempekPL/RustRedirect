@@ -30,13 +30,13 @@ pub(crate) fn mount_v1(rocket: Rocket<Build>) -> Rocket<Build> {
             i_edit_put,
             i_delete_delete,
             i_random_post,
-            ],
+        ],
     );
     let rocket = rocket.mount(
         "/api/v1/auth",
         routes![
             list_auth,
-            add_auth,
+            create_auth,
             edit_auth,
         // TODO:   delete_auth
      ],
@@ -160,16 +160,17 @@ async fn remove_redirect(name: Option<String>, auth: Auth) -> Json<Response> {
     };
     let db = connect().await.collection::<Domain>(DOMAINS_COLLECTION);
     let dom: Option<Domain> = ok_return!(db.find_one(search_name, None).await, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
-    return if dom.is_some() {
-        let res = db.delete_one(doc! { "_id": dom.unwrap()._id }, None).await;
-        match res {
-            Ok(r) if r.deleted_count > 0 => Response::new(true, &format!("Deleted redirect named '{}'", name)).json(),
-            Ok(_) => Response::NOTHING_DELETED().json(),
-            Err(_) => Response::COULD_NOT("delete", "redirect").json()
-        }
-    } else {
-        Response::COULD_NOT("find", "redirect").json()
-    };
+    match dom {
+        Some(dom) => {
+            let res = db.delete_one(doc! { "_id": dom._id }, None).await;
+            match res {
+                Ok(r) if r.deleted_count > 0 => Response::new(true, &format!("Deleted redirect named '{}'", name)).json(),
+                Ok(_) => Response::NOTHING_DELETED().json(),
+                Err(_) => Response::COULD_NOT("delete", "redirect").json()
+            }
+        },
+        None => Response::COULD_NOT("find", "redirect").json()
+    }
 }
 
 ////////////
@@ -196,8 +197,8 @@ async fn list_auth(auth: Auth) -> Json<Response> {
     }.json()
 }
 
-#[post("/add?<name>&<password>&<permission>")]
-async fn add_auth(name: Option<String>, password: Option<String>, permission: Option<u8>, auth: Auth) -> Json<Response> {
+#[post("/create?<name>&<password>&<permission>")]
+async fn create_auth(name: Option<String>, password: Option<String>, permission: Option<u8>, auth: Auth) -> Json<Response> {
     let name = some_return!(name, Response::USER_DID_NOT_PROVIDE_PARAM("name").json());
     let password = some_return!(password, Response::USER_DID_NOT_PROVIDE_PARAM("password").json());
     let permission = match permission {
