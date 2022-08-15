@@ -1,5 +1,5 @@
 use std::fmt::{Display, Formatter};
-use std::process;
+use std::{env, process};
 use mongodb::{Client, Database};
 use mongodb::bson::Bson;
 use mongodb::bson::oid::ObjectId;
@@ -46,11 +46,20 @@ impl Default for MoConfig {
 }
 
 pub(crate) async fn connect() -> Database {
-    let conf = match Config::figment().extract::<MoConfig>() {
-        Ok(conf) => conf,
-        Err(_) => {
-            println!("Database config not found. Using default values");
-            MoConfig::default()
+    let conf = if env::var("CI").unwrap_or("false".to_string()).parse::<bool>().unwrap_or(false) {
+        MoConfig {
+            db_host: "localhost".to_string(),
+            db_port: 27017,
+            db_user: "admin".to_string(),
+            db_password: "pass".to_string()
+        }
+    } else {
+        match Config::figment().extract::<MoConfig>() {
+            Ok(conf) => conf,
+            Err(_) => {
+                println!("Database config not found. Using default values");
+                MoConfig::default()
+            }
         }
     };
     let client = re_conn(conf, 3).await;
@@ -181,16 +190,8 @@ impl Permission {
         self.0 == 0 && self.1 == 0 && self.2 == 0 && self.3 == 0 && self.4 == 0 && self.5 == 0
     }
 
-    pub(crate) fn to_arr(self) -> [u8; 6] {
-        [self.0, self.1, self.2, self.3, self.4, self.5]
-    }
-
     pub(crate) fn to_vec(self) -> Vec<u8> {
         vec![self.0, self.1, self.2, self.3, self.4, self.5]
-    }
-
-    pub(crate) fn from_arr(nums: [u8; 6]) -> Permission {
-        Permission(nums[0], nums[1], nums[2], nums[3], nums[4], nums[5])
     }
 
     pub(crate) fn from_vec(nums: Vec<u8>) -> Permission {
