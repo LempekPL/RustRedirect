@@ -6,6 +6,7 @@ use rand::{
     SeedableRng,
     distributions::{Alphanumeric, DistString},
 };
+use regex::Regex;
 use rocket::{
     Build,
     Rocket,
@@ -94,6 +95,10 @@ async fn random_redirect(domain: Option<String>, user: Json<PreAuth>) -> Json<Re
         Err(e) => return e,
     };
     let domain = some_return!(domain, Response::USER_DID_NOT_PROVIDE_PARAM("domain").json());
+    let domain_regex = Regex::new(r#"https?://[^-][A-z\d-]{1,63}(?:\.[^-][A-z\d-]+){0,63}\.[A-z]{2,}"#).unwrap();
+    if !domain_regex.is_match(&domain) {
+        return Response::NOT_ALLOWED_DOMAIN_FORMAT().json();
+    }
     let db = connect().await.collection::<Domain>(DOMAINS_COLLECTION);
     if auth.permission.can_random() {
         let name = match get_check_random(&db, Alphanumeric.sample_string(&mut rand::rngs::SmallRng::from_entropy(), 8), 3).await {
@@ -136,7 +141,10 @@ async fn create_redirect(name: Option<String>, domain: Option<String>, user: Jso
     };
     let name = some_return!(name, Response::USER_DID_NOT_PROVIDE_PARAM("name").json());
     let domain = some_return!(domain, Response::USER_DID_NOT_PROVIDE_PARAM("domain").json());
-
+    let domain_regex = Regex::new(r#"https?://[^-][A-z\d-]{1,63}(?:\.[^-][A-z\d-]+){0,63}\.[A-z]{2,}"#).unwrap();
+    if !domain_regex.is_match(&domain) {
+        return Response::NOT_ALLOWED_DOMAIN_FORMAT().json();
+    }
     if auth.permission.can_own() {
         let db = connect().await.collection::<Domain>(DOMAINS_COLLECTION);
         let dom: Option<Domain> = ok_return!(db.find_one(doc! { "name" : name.clone() }, None).await, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
@@ -166,6 +174,10 @@ async fn edit_redirect(name: Option<String>, newname: Option<String>, domain: Op
         Err(e) => return e,
     };
     let name = some_return!(name, Response::USER_DID_NOT_PROVIDE_PARAM("name").json());
+    let domain_regex = Regex::new(r#"https?://[^-][A-z\d-]{1,63}(?:\.[^-][A-z\d-]+){0,63}\.[A-z]{2,}"#).unwrap();
+    if domain.is_some() && !domain_regex.is_match(&domain.clone().unwrap()) {
+        return Response::NOT_ALLOWED_DOMAIN_FORMAT().json();
+    }
     let search_name = match get_search(auth, &name) {
         Ok(o) => o,
         Err(e) => return e
@@ -433,6 +445,7 @@ impl Response {
     const COULD_NOT: fn(&str, &str) -> Response = |action: &str, thing: &str| Response::new(false, &format!("Could not {} {}.", action, thing));
     const NOTHING_CHANGED: fn() -> Response = || Response::new(false, "Nothing changed.");
     const NOTHING_DELETED: fn() -> Response = || Response::new(false, "Nothing deleted.");
+    const NOT_ALLOWED_DOMAIN_FORMAT: fn() -> Response = || Response::new(false, "Sent domain doesn't match the format e. g. https://example.com.");
 
     const USER_NOT_FOUND: fn() -> Response = || Response::new(false, "User not found.");
     const WRONG_PASSWORD: fn() -> Response = || Response::new(false, "Wrong password.");

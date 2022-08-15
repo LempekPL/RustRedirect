@@ -1,3 +1,5 @@
+Somehow this code is\
+[![Rust](https://github.com/LempekPL/rust-redirect/actions/workflows/rust.yml/badge.svg?branch=master)](https://github.com/LempekPL/rust-redirect/actions/workflows/rust.yml)
 # Own url shortener or redirector
 
 ## Building from source
