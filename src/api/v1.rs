@@ -1,13 +1,15 @@
+use std::future::Future;
 use mongodb::{
     Collection,
-    bson::{doc, Document}
+    bson::{doc, Document},
 };
 use rand::{
     SeedableRng,
-    distributions::{Alphanumeric, DistString}
+    distributions::{Alphanumeric, DistString},
 };
 use rocket::{
     Build,
+    Data,
     Request,
     request,
     Rocket,
@@ -15,9 +17,11 @@ use rocket::{
     http::Status,
     outcome::Outcome,
     request::FromRequest,
-    serde::json::Json
+    serde::json::Json,
 };
-use serde::Serialize;
+use rocket::data::FromData;
+use rocket::http::ContentType;
+use serde::{Serialize, Deserialize};
 use serde_json::Value;
 use crate::{AUTH_COLLECTION, DOMAINS_COLLECTION, Domain, connect, some_return, ok_return, add_and};
 use crate::database::{Auth, Permission};
@@ -26,6 +30,12 @@ use crate::database::{Auth, Permission};
 struct Response {
     success: bool,
     response: Value,
+}
+
+#[derive(Deserialize, Clone)]
+struct PreAuth {
+    name: String,
+    password: String,
 }
 
 pub(crate) fn mount_v1(rocket: Rocket<Build>) -> Rocket<Build> {
@@ -62,8 +72,12 @@ pub(crate) fn mount_v1(rocket: Rocket<Build>) -> Rocket<Build> {
 // DOMAINS
 ////////////
 
-#[get("/")]
-async fn check_domains(auth: Auth) -> Json<Response> {
+#[get("/", data = "<user>")]
+async fn check_domains(user: Json<PreAuth>) -> Json<Response> {
+    let auth = match authorize(user).await {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
     let document;
     if auth.permission.can_list() {
         document = None;
@@ -82,8 +96,12 @@ async fn check_domains(auth: Auth) -> Json<Response> {
     }.json()
 }
 
-#[post("/random?<domain>")]
-async fn random_redirect(domain: Option<String>, auth: Auth) -> Json<Response> {
+#[post("/random?<domain>", data = "<user>")]
+async fn random_redirect(domain: Option<String>, user: Json<PreAuth>) -> Json<Response> {
+    let auth = match authorize(user).await {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
     let domain = some_return!(domain, Response::USER_DID_NOT_PROVIDE_PARAM("domain").json());
     let db = connect().await.collection::<Domain>(DOMAINS_COLLECTION);
     if auth.permission.can_random() {
@@ -116,11 +134,15 @@ async fn get_check_random(db: &Collection<Domain>, name: String, tries: u32) -> 
     return match dom {
         Some(_) => get_check_random(db, Alphanumeric.sample_string(&mut rand::rngs::SmallRng::from_entropy(), 8), tries - 1).await,
         None => Ok(name)
-    }
+    };
 }
 
-#[post("/create?<name>&<domain>")]
-async fn create_redirect(name: Option<String>, domain: Option<String>, auth: Auth) -> Json<Response> {
+#[post("/create?<name>&<domain>", data = "<user>")]
+async fn create_redirect(name: Option<String>, domain: Option<String>, user: Json<PreAuth>) -> Json<Response> {
+    let auth = match authorize(user).await {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
     let name = some_return!(name, Response::USER_DID_NOT_PROVIDE_PARAM("name").json());
     let domain = some_return!(domain, Response::USER_DID_NOT_PROVIDE_PARAM("domain").json());
 
@@ -146,8 +168,12 @@ async fn create_redirect(name: Option<String>, domain: Option<String>, auth: Aut
     }
 }
 
-#[put("/edit?<name>&<newname>&<domain>")]
-async fn edit_redirect(name: Option<String>, newname: Option<String>, domain: Option<String>, auth: Auth) -> Json<Response> {
+#[put("/edit?<name>&<newname>&<domain>", data = "<user>")]
+async fn edit_redirect(name: Option<String>, newname: Option<String>, domain: Option<String>, user: Json<PreAuth>) -> Json<Response> {
+    let auth = match authorize(user).await {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
     let name = some_return!(name, Response::USER_DID_NOT_PROVIDE_PARAM("name").json());
     let search_name = match get_search(auth, &name) {
         Ok(o) => o,
@@ -191,8 +217,12 @@ async fn edit_redirect(name: Option<String>, newname: Option<String>, domain: Op
     }
 }
 
-#[delete("/delete?<name>")]
-async fn remove_redirect(name: Option<String>, auth: Auth) -> Json<Response> {
+#[delete("/delete?<name>", data = "<user>")]
+async fn remove_redirect(name: Option<String>, user: Json<PreAuth>) -> Json<Response> {
+    let auth = match authorize(user).await {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
     let name = some_return!(name, Response::USER_DID_NOT_PROVIDE_PARAM("name").json());
     let search_name = match get_search(auth, &name) {
         Ok(o) => o,
@@ -208,7 +238,7 @@ async fn remove_redirect(name: Option<String>, auth: Auth) -> Json<Response> {
                 Ok(_) => Response::NOTHING_DELETED().json(),
                 Err(_) => Response::COULD_NOT("delete", "redirect").json()
             }
-        },
+        }
         None => Response::COULD_NOT("find", "redirect").json()
     }
 }
@@ -217,8 +247,12 @@ async fn remove_redirect(name: Option<String>, auth: Auth) -> Json<Response> {
 // AUTHS
 ////////////
 
-#[get("/")]
-async fn list_auth(auth: Auth) -> Json<Response> {
+#[get("/", data = "<user>")]
+async fn list_auth(user: Json<PreAuth>) -> Json<Response> {
+    let auth = match authorize(user).await {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
     let document;
     if auth.permission.can_admin() {
         document = None
@@ -237,8 +271,12 @@ async fn list_auth(auth: Auth) -> Json<Response> {
     }.json()
 }
 
-#[post("/create?<name>&<password>&<permission>")]
-async fn create_auth(name: Option<String>, password: Option<String>, permission: Option<u8>, auth: Auth) -> Json<Response> {
+#[post("/create?<name>&<password>&<permission>", data = "<user>")]
+async fn create_auth(name: Option<String>, password: Option<String>, permission: Option<u8>, user: Json<PreAuth>) -> Json<Response> {
+    let auth = match authorize(user).await {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
     let name = some_return!(name, Response::USER_DID_NOT_PROVIDE_PARAM("name").json());
     let password = some_return!(password, Response::USER_DID_NOT_PROVIDE_PARAM("password").json());
     let permission = match permission {
@@ -268,8 +306,12 @@ async fn create_auth(name: Option<String>, password: Option<String>, permission:
     };
 }
 
-#[put("/edit?<name>&<newname>&<password>&<permission>")]
-async fn edit_auth(name: Option<String>, newname: Option<String>, password: Option<String>, permission: Option<u8>, auth: Auth) -> Json<Response> {
+#[put("/edit?<name>&<newname>&<password>&<permission>", data = "<user>")]
+async fn edit_auth(name: Option<String>, newname: Option<String>, password: Option<String>, permission: Option<u8>, user: Json<PreAuth>) -> Json<Response> {
+    let auth = match authorize(user).await {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
     let name = some_return!(name, Response::USER_DID_NOT_PROVIDE_PARAM("name").json());
     let permission = match permission {
         None => None,
@@ -333,8 +375,12 @@ async fn edit_auth(name: Option<String>, newname: Option<String>, password: Opti
     };
 }
 
-#[delete("/delete?<name>")]
-async fn delete_auth(name: Option<String>, auth: Auth) -> Json<Response> {
+#[delete("/delete?<name>", data = "<user>")]
+async fn delete_auth(name: Option<String>, user: Json<PreAuth>) -> Json<Response> {
+    let auth = match authorize(user).await {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
     let name = some_return!(name, Response::USER_DID_NOT_PROVIDE_PARAM("name").json());
     let db = connect().await.collection::<Auth>(AUTH_COLLECTION);
     let del_auth = ok_return!(db.find_one(doc! { "name": name.clone() }, None).await, Response::DATABASE_WHILST_TRYING_TO_FIND().json());
@@ -348,36 +394,27 @@ async fn delete_auth(name: Option<String>, auth: Auth) -> Json<Response> {
                     Err(_) => Response::COULD_NOT("delete", "auth").json()
                 }
             } else {
-                return Response::PERMISSIONS_TOO_LOW().json()
+                return Response::PERMISSIONS_TOO_LOW().json();
             }
-        },
+        }
         None => Response::COULD_NOT("find", "redirect").json()
     }
 }
-
 
 //////////
 // AUTH
 //////////
 
-#[rocket::async_trait]
-impl<'a> FromRequest<'a> for Auth {
-    type Error = AuthError;
-
-    async fn from_request(request: &'a Request<'_>) -> request::Outcome<Self, Self::Error> {
-        let name: &str = some_return!(request.headers().get_one("name"), Outcome::Failure((Status::BadRequest, AuthError::MissingName)));
-        let password: &str = some_return!(request.headers().get_one("password"), Outcome::Failure((Status::BadRequest, AuthError::MissingPassword)));
-        // connect to database and select auth collection
-        let col = connect().await.collection::<Auth>(AUTH_COLLECTION);
-        let found: Option<Auth> = ok_return!(col.find_one(doc! {"name": name}, None).await, Outcome::Failure((Status::InternalServerError, AuthError::ServerError)));
-        let auth: Auth = some_return!(found, Outcome::Failure((Status::Unauthorized, AuthError::NotFound)));
-        let ver: bool = ok_return!(bcrypt::verify(password, &auth.password), Outcome::Failure((Status::Unauthorized, AuthError::Unknown)));
-        return if ver {
-            Outcome::Success(auth)
-        } else {
-            Outcome::Failure((Status::Unauthorized, AuthError::Invalid))
-        };
-    }
+async fn authorize(user: Json<PreAuth>) -> Result<Auth, Json<Response>> {
+    let col = connect().await.collection::<Auth>(AUTH_COLLECTION);
+    let found = ok_return!(col.find_one(doc! {"name": user.name.clone()}, None).await, Err(Response::DATABASE_WHILST_TRYING_TO_FIND().json()));
+    let auth = some_return!(found, Err(Response::USER_NOT_FOUND().json()));
+    let ver = ok_return!(bcrypt::verify(user.password.clone(), &auth.password), Err(Response::BCRYPT_WHILST_TRYING_TO_VERIFY().json()));
+    return if ver {
+        Ok(auth)
+    } else {
+        Err(Response::WRONG_PASSWORD().json())
+    };
 }
 
 //////////////
@@ -405,20 +442,10 @@ impl Response {
     const COULD_NOT: fn(&str, &str) -> Response = |action: &str, thing: &str| Response::new(false, &format!("Could not {} {}.", action, thing));
     const NOTHING_CHANGED: fn() -> Response = || Response::new(false, "Nothing changed.");
     const NOTHING_DELETED: fn() -> Response = || Response::new(false, "Nothing deleted.");
-}
 
-/////////////
-// ERRORS
-/////////////
-
-#[derive(Debug)]
-pub(crate) enum AuthError {
-    MissingPassword,
-    MissingName,
-    Invalid,
-    ServerError,
-    NotFound,
-    Unknown,
+    const USER_NOT_FOUND: fn() -> Response = || Response::new(false, "User not found.");
+    const WRONG_PASSWORD: fn() -> Response = || Response::new(false, "Wrong password.");
+    const BCRYPT_WHILST_TRYING_TO_VERIFY: fn() -> Response = || Response::new(false, "Bcrypt error whilst trying to verify user.");
 }
 
 //////////////////
