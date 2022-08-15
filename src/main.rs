@@ -1,7 +1,7 @@
-#[cfg(test)]
-mod tests;
 mod api;
 mod database;
+#[cfg(test)]
+mod tests;
 
 #[macro_use]
 extern crate rocket;
@@ -15,11 +15,15 @@ const DOMAIN: &str = "https://lmpk.tk";
 const DATABASE_NAME: &str = "redirector";
 // collection for domains in debug
 #[cfg(debug_assertions)]
-const DOMAINS_COLLECTION: &str = "domainsDev";
+const DOMAINS_COLLECTION: &str = "devDomains";
 // collection for domains in release
 #[cfg(not(debug_assertions))]
 const DOMAINS_COLLECTION: &str = "domains";
-// collection for auth codes
+// collection for auth codes in debug
+#[cfg(debug_assertions)]
+const AUTH_COLLECTION: &str = "devAuth";
+// collection for auth codes in release
+#[cfg(not(debug_assertions))]
 const AUTH_COLLECTION: &str = "auth";
 
 #[get("/<name>")]

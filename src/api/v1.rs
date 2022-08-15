@@ -1,4 +1,3 @@
-use std::future::Future;
 use mongodb::{
     Collection,
     bson::{doc, Document},
@@ -9,18 +8,10 @@ use rand::{
 };
 use rocket::{
     Build,
-    Data,
-    Request,
-    request,
     Rocket,
     futures::TryStreamExt,
-    http::Status,
-    outcome::Outcome,
-    request::FromRequest,
-    serde::json::Json,
+    serde::json::Json
 };
-use rocket::data::FromData;
-use rocket::http::ContentType;
 use serde::{Serialize, Deserialize};
 use serde_json::Value;
 use crate::{AUTH_COLLECTION, DOMAINS_COLLECTION, Domain, connect, some_return, ok_return, add_and};
