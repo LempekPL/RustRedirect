@@ -96,7 +96,7 @@ async fn random_redirect(domain: Option<String>, user: Json<PreAuth>) -> Json<Re
     };
     let domain = some_return!(domain, Response::USER_DID_NOT_PROVIDE_PARAM("domain").json());
     let domain_regex = Regex::new(r#"https?://[^-][A-z\d-]{1,63}(?:\.[^-][A-z\d-]+){0,63}\.[A-z]{2,}"#).unwrap();
-    if domain_regex.is_match(&domain) {
+    if !domain_regex.is_match(&domain) {
         return Response::NOT_ALLOWED_DOMAIN_FORMAT().json();
     }
     let db = connect().await.collection::<Domain>(DOMAINS_COLLECTION);
@@ -142,7 +142,7 @@ async fn create_redirect(name: Option<String>, domain: Option<String>, user: Jso
     let name = some_return!(name, Response::USER_DID_NOT_PROVIDE_PARAM("name").json());
     let domain = some_return!(domain, Response::USER_DID_NOT_PROVIDE_PARAM("domain").json());
     let domain_regex = Regex::new(r#"https?://[^-][A-z\d-]{1,63}(?:\.[^-][A-z\d-]+){0,63}\.[A-z]{2,}"#).unwrap();
-    if domain_regex.is_match(&domain) {
+    if !domain_regex.is_match(&domain) {
         return Response::NOT_ALLOWED_DOMAIN_FORMAT().json();
     }
     if auth.permission.can_own() {
@@ -175,7 +175,7 @@ async fn edit_redirect(name: Option<String>, newname: Option<String>, domain: Op
     };
     let name = some_return!(name, Response::USER_DID_NOT_PROVIDE_PARAM("name").json());
     let domain_regex = Regex::new(r#"https?://[^-][A-z\d-]{1,63}(?:\.[^-][A-z\d-]+){0,63}\.[A-z]{2,}"#).unwrap();
-    if domain.is_some() && domain_regex.is_match(&domain.clone().unwrap()) {
+    if domain.is_some() && !domain_regex.is_match(&domain.clone().unwrap()) {
         return Response::NOT_ALLOWED_DOMAIN_FORMAT().json();
     }
     let search_name = match get_search(auth, &name) {
